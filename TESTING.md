@@ -6,9 +6,9 @@ This guide will help you set up a simple test scene to verify the basic function
 
 The Nostr Unity SDK has the following dependencies:
 
-1. Cryptography.ECDSA.Secp256k1 - a pure C# implementation of the secp256k1 elliptic curve used for cryptographic operations
-   - This library should be placed in your Unity project's `Assets/Plugins` directory
-   - You can download it from the [NuGet Gallery](https://www.nuget.org/packages/Cryptography.ECDSA.Secp256k1/)
+1. Secp256k1.Net - a C# wrapper for the native libsecp256k1 library used for cryptographic operations
+   - Both `Secp256k1.Net.dll` and `secp256k1.dll` should be in your Unity project's `Assets/Plugins/Secp256k1Net` directory
+   - The SDK includes these files already
 
 ## Setup
 
@@ -77,6 +77,9 @@ public class NostrTest : MonoBehaviour
     [SerializeField]
     private TMP_Text statusText;
     
+    [SerializeField]
+    private Button testCryptoButton;
+    
     private NostrManager nostrManager;
     
     void Start()
@@ -104,6 +107,12 @@ public class NostrTest : MonoBehaviour
         if (importNsecButton != null)
         {
             importNsecButton.onClick.AddListener(ImportNsecKey);
+        }
+        
+        // Set up test crypto button
+        if (testCryptoButton != null)
+        {
+            testCryptoButton.onClick.AddListener(TestCrypto);
         }
         
         UpdateStatus("Ready to test. Start by generating or importing keys.");
@@ -149,6 +158,12 @@ public class NostrTest : MonoBehaviour
     {
         UpdateStatus("Posting test message...");
         nostrManager.PostTextNote("Hello from Unity Nostr SDK! This is a test message.");
+    }
+    
+    void TestCrypto()
+    {
+        UpdateStatus("Testing cryptography implementation...");
+        nostrManager.TestKeyGeneration();
     }
     
     void OnConnected(string relay)
@@ -205,6 +220,7 @@ public class NostrTest : MonoBehaviour
    - Drag your NSEC input field to the "Nsec Input Field" field
    - Drag your "Import NSEC" button to the "Import Nsec Button" field
    - Drag your TMP_Text to the "Status Text" field
+   - Drag your "Test Crypto" button to the "Test Crypto Button" field
 
 ## Test the Implementation
 
@@ -216,6 +232,45 @@ public class NostrTest : MonoBehaviour
 4. Click "Post Message" - this should post a message to connected relays
 
 Note that the WebSocket connection will attempt to connect to real relays, but the cryptography implementation is a placeholder at this stage.
+
+## Test the Secp256k1 Implementation
+
+To test the secp256k1 cryptography implementation, follow these steps:
+
+1. Update your NostrTest.cs script to add a button for testing the key generation (if you haven't already):
+
+```csharp
+// Add this field at the top of the NostrTest class
+[SerializeField]
+private Button testCryptoButton;
+
+// Add this line in the Start method to set up the button listener
+testCryptoButton.onClick.AddListener(TestCrypto);
+
+// Add this method to call the TestKeyGeneration method on NostrManager
+void TestCrypto()
+{
+    UpdateStatus("Testing cryptography implementation...");
+    nostrManager.TestKeyGeneration();
+}
+```
+
+2. In the Unity Editor:
+   - Add a new Button to your Canvas UI named "Test Crypto"
+   - Select your Canvas in the Hierarchy
+   - In the Inspector, drag the "Test Crypto" button to the "Test Crypto Button" field in the NostrTest component
+
+3. Run the scene and click the "Test Crypto" button
+   - Check the Console in Unity to see the debug logs from the cryptography test
+   - You should see logs showing:
+     - A generated private key
+     - The derived public key
+     - A signature for a test message
+     - Verification result for the signature
+
+This test uses the Secp256k1.Net library, which is a C# wrapper around the native libsecp256k1 library (the same one used by Bitcoin). It provides cryptographically secure implementations of all the required operations for Nostr.
+
+**Note:** If you encounter any issues with the native library loading, ensure that `secp256k1.dll` is included in your build output directory.
 
 ## Expected Results
 

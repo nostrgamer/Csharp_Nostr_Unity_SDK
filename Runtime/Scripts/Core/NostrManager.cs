@@ -298,5 +298,32 @@ namespace Nostr.Unity
                 _nostrClient.Disconnect();
             }
         }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// Test method for verifying key generation
+        /// </summary>
+        public void TestKeyGeneration()
+        {
+            Debug.Log("Testing Nostr key generation with NBitcoin...");
+            
+            // Generate a private key
+            string privateKey = _keyManager.GeneratePrivateKey();
+            Debug.Log($"Generated private key: {privateKey}");
+            
+            // Derive the public key
+            string publicKey = _keyManager.GetPublicKey(privateKey);
+            Debug.Log($"Derived public key: {publicKey}");
+            
+            // Test signing a message
+            string message = "Hello, Nostr!";
+            string signature = _keyManager.SignMessage(message, privateKey);
+            Debug.Log($"Signed message '{message}' with signature: {signature}");
+            
+            // Test verifying the signature
+            bool isValid = _keyManager.VerifySignature(message, signature, publicKey);
+            Debug.Log($"Signature verification result: {isValid}");
+        }
+#endif
     }
 } 

@@ -7,6 +7,10 @@
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 
+# Project specific directories
+temp/
+temp_project/
+
 # Visual Studio / Rider / VS Code files
 .vs/
 .idea/

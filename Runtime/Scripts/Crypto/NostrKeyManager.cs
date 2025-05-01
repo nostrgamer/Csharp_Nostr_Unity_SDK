@@ -81,8 +81,8 @@ namespace Nostr.Unity
             byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
             byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
             
-            // Nostr expects 32-byte public keys, but secp256k1 returns 33-byte compressed keys
-            // We need to remove the compression prefix (first byte)
+            // Secp256k1.Net returns 33-byte compressed public keys
+            // For Nostr, we need 32-byte public keys (the x-coordinate without the compression prefix)
             byte[] nostrPublicKeyBytes;
             
             if (publicKeyBytes.Length == 33)
@@ -193,7 +193,7 @@ namespace Nostr.Unity
                 if (publicKeyBytes.Length == 32)
                 {
                     byte[] compressedKey = new byte[33];
-                    compressedKey[0] = 0x02; // Assume even y-coordinate
+                    compressedKey[0] = 0x02; // Assume even y-coordinate for simplicity
                     Array.Copy(publicKeyBytes, 0, compressedKey, 1, 32);
                     publicKeyBytes = compressedKey;
                 }
