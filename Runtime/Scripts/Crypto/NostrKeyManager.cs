@@ -2,6 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
+using Nostr.Unity.Utils;
 
 namespace Nostr.Unity
 {
@@ -16,8 +17,9 @@ namespace Nostr.Unity
         /// <summary>
         /// Generates a new private key
         /// </summary>
-        /// <returns>The hex-encoded private key</returns>
-        public string GeneratePrivateKey()
+        /// <param name="useHex">Whether to return the key in hex format (true) or Bech32 format (false)</param>
+        /// <returns>The hex-encoded or Bech32-encoded private key</returns>
+        public string GeneratePrivateKey(bool useHex = true)
         {
             // TODO: Replace with proper Secp256k1 key generation
             // This is a placeholder - we need to implement proper key generation
@@ -29,54 +31,101 @@ namespace Nostr.Unity
                 rng.GetBytes(privateKeyBytes);
             }
             
-            // Convert to hex string
-            StringBuilder sb = new StringBuilder();
-            foreach (byte b in privateKeyBytes)
-            {
-                sb.Append(b.ToString("x2"));
-            }
+            string hexKey = BytesToHex(privateKeyBytes);
             
-            return sb.ToString();
+            if (useHex)
+            {
+                return hexKey;
+            }
+            else
+            {
+                return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
+            }
         }
         
         /// <summary>
         /// Derives a public key from a private key
         /// </summary>
-        /// <param name="privateKey">The hex-encoded private key</param>
-        /// <returns>The hex-encoded public key</returns>
-        public string GetPublicKey(string privateKey)
+        /// <param name="privateKey">The private key (hex or Bech32 format)</param>
+        /// <param name="useHex">Whether to return the key in hex format (true) or Bech32 format (false)</param>
+        /// <returns>The hex-encoded or Bech32-encoded public key</returns>
+        public string GetPublicKey(string privateKey, bool useHex = true)
         {
+            string hexPrivateKey = privateKey;
+            
+            // Check if the key is in Bech32 format
+            if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+            {
+                try
+                {
+                    (string prefix, string data) = Bech32.DecodeToHex(privateKey);
+                    if (prefix != NostrConstants.NSEC_PREFIX)
+                    {
+                        throw new ArgumentException("Invalid nsec prefix");
+                    }
+                    hexPrivateKey = data;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error decoding Bech32 private key: {ex.Message}");
+                    throw;
+                }
+            }
+            
             // TODO: Replace with proper Secp256k1 public key derivation
             // This is a placeholder - we need to implement proper key derivation
             
             // For now, just hash the private key to simulate a public key
             using (SHA256 sha256 = SHA256.Create())
             {
-                byte[] privateKeyBytes = HexToBytes(privateKey);
+                byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
                 byte[] publicKeyBytes = sha256.ComputeHash(privateKeyBytes);
                 
-                // Convert to hex string
-                StringBuilder sb = new StringBuilder();
-                foreach (byte b in publicKeyBytes)
-                {
-                    sb.Append(b.ToString("x2"));
-                }
+                string hexPublicKey = BytesToHex(publicKeyBytes);
                 
-                return sb.ToString();
+                if (useHex)
+                {
+                    return hexPublicKey;
+                }
+                else
+                {
+                    return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, hexPublicKey);
+                }
             }
         }
         
         /// <summary>
         /// Stores the private key in PlayerPrefs
         /// </summary>
-        /// <param name="privateKey">The hex-encoded private key to store</param>
+        /// <param name="privateKey">The private key to store (hex or Bech32 format)</param>
         /// <param name="encrypt">Whether to encrypt the key in storage</param>
         /// <returns>True if successful, otherwise false</returns>
         public bool StoreKeys(string privateKey, bool encrypt = true)
         {
             try
             {
-                string valueToStore = privateKey;
+                string hexPrivateKey = privateKey;
+                
+                // Check if the key is in Bech32 format
+                if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+                {
+                    try
+                    {
+                        (string prefix, string data) = Bech32.DecodeToHex(privateKey);
+                        if (prefix != NostrConstants.NSEC_PREFIX)
+                        {
+                            throw new ArgumentException("Invalid nsec prefix");
+                        }
+                        hexPrivateKey = data;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error decoding Bech32 private key: {ex.Message}");
+                        throw;
+                    }
+                }
+                
+                string valueToStore = hexPrivateKey;
                 
                 if (encrypt)
                 {
@@ -89,7 +138,7 @@ namespace Nostr.Unity
                     
                     // Simple XOR encryption - should be replaced with more secure method
                     string savedEncryptionKey = PlayerPrefs.GetString(ENCRYPTION_KEY);
-                    valueToStore = EncryptDecrypt(privateKey, savedEncryptionKey);
+                    valueToStore = EncryptDecrypt(hexPrivateKey, savedEncryptionKey);
                 }
                 
                 PlayerPrefs.SetString(NSEC_KEY, valueToStore);
@@ -106,8 +155,9 @@ namespace Nostr.Unity
         /// <summary>
         /// Loads the private key from PlayerPrefs
         /// </summary>
-        /// <returns>The hex-encoded private key, or null if not found</returns>
-        public string LoadPrivateKey()
+        /// <param name="useBech32">Whether to return the key in Bech32 format</param>
+        /// <returns>The private key, or null if not found</returns>
+        public string LoadPrivateKey(bool useBech32 = false)
         {
             try
             {
@@ -126,7 +176,14 @@ namespace Nostr.Unity
                     storedValue = EncryptDecrypt(storedValue, encryptionKey);
                 }
                 
-                return storedValue;
+                if (useBech32)
+                {
+                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, storedValue);
+                }
+                else
+                {
+                    return storedValue;
+                }
             }
             catch (Exception ex)
             {
@@ -172,18 +229,15 @@ namespace Nostr.Unity
         /// </summary>
         private byte[] HexToBytes(string hex)
         {
-            if (hex.Length % 2 == 1)
-            {
-                throw new ArgumentException("Hex string must have an even length");
-            }
-            
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < hex.Length; i += 2)
-            {
-                bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
-            }
-            
-            return bytes;
+            return Bech32.HexToBytes(hex);
+        }
+        
+        /// <summary>
+        /// Converts a byte array to hex string
+        /// </summary>
+        private string BytesToHex(byte[] bytes)
+        {
+            return Bech32.BytesToHex(bytes);
         }
     }
 } 
