@@ -2,6 +2,14 @@
 
 This guide will help you set up a simple test scene to verify the basic functionality of the Nostr Unity SDK.
 
+## Prerequisites
+
+The Nostr Unity SDK has the following dependencies:
+
+1. Cryptography.ECDSA.Secp256k1 - a pure C# implementation of the secp256k1 elliptic curve used for cryptographic operations
+   - This library should be placed in your Unity project's `Assets/Plugins` directory
+   - You can download it from the [NuGet Gallery](https://www.nuget.org/packages/Cryptography.ECDSA.Secp256k1/)
+
 ## Setup
 
 1. Import the package into your Unity project using the Package Manager:

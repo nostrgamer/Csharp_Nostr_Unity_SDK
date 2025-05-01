@@ -1,12 +1,12 @@
 using System;
 using System.Security.Cryptography;
 using UnityEngine;
+using Cryptography.ECDSA; // Added reference to the actual secp256k1 library
 
 namespace Nostr.Unity
 {
     /// <summary>
     /// Manages Secp256k1 cryptographic operations for Nostr
-    /// This is a simplified implementation using standard .NET cryptography
     /// </summary>
     public static class Secp256k1Manager
     {
@@ -18,12 +18,8 @@ namespace Nostr.Unity
         {
             try
             {
-                byte[] privateKey = new byte[32];
-                using (var rng = RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(privateKey);
-                }
-                return privateKey;
+                // Use the real secp256k1 library to generate a private key
+                return Secp256k1.GeneratePrivateKey();
             }
             catch (Exception ex)
             {
@@ -35,7 +31,6 @@ namespace Nostr.Unity
 
         /// <summary>
         /// Derives a public key from a private key
-        /// Note: This is a placeholder implementation
         /// </summary>
         /// <param name="privateKey">The 32-byte private key</param>
         /// <returns>The 33-byte compressed public key</returns>
@@ -48,22 +43,8 @@ namespace Nostr.Unity
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
 
-                // NOTE: This is a placeholder - in a real implementation, 
-                // you would use proper Secp256k1 curve operations
-                Debug.LogWarning("Using placeholder public key derivation. Replace with proper Secp256k1 implementation.");
-                
-                // Create a deterministic derived key for testing
-                byte[] publicKey = new byte[33];
-                publicKey[0] = 0x02; // Compressed key prefix (even y-coordinate)
-                
-                // Derive the remaining 32 bytes deterministically from the private key
-                using (var sha256 = SHA256.Create())
-                {
-                    byte[] hash = sha256.ComputeHash(privateKey);
-                    Array.Copy(hash, 0, publicKey, 1, 32);
-                }
-                
-                return publicKey;
+                // Use the real secp256k1 library to get the public key
+                return Secp256k1.GetPublicKey(privateKey, true); // true = compressed format
             }
             catch (Exception ex)
             {
@@ -90,11 +71,9 @@ namespace Nostr.Unity
                     message = ""; // Use empty string
                 }
                 
-                using (var sha256 = SHA256.Create())
-                {
-                    byte[] messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
-                    return sha256.ComputeHash(messageBytes);
-                }
+                // Convert the message to bytes and hash it
+                byte[] messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
+                return Secp256k1.Hash(messageBytes);
             }
             catch (Exception ex)
             {
@@ -106,7 +85,6 @@ namespace Nostr.Unity
 
         /// <summary>
         /// Signs a message hash with a private key
-        /// Note: This is a placeholder implementation
         /// </summary>
         /// <param name="messageHash">The 32-byte hash of the message</param>
         /// <param name="privateKey">The 32-byte private key</param>
@@ -125,28 +103,8 @@ namespace Nostr.Unity
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
 
-                // NOTE: This is a placeholder - in a real implementation, 
-                // you would use proper Secp256k1 signing algorithms
-                Debug.LogWarning("Using placeholder signature. Replace with proper Secp256k1 implementation.");
-                
-                // Create a deterministic signature for testing
-                byte[] signature = new byte[64];
-                
-                // Derive deterministic signature from private key and message hash
-                using (var hmac = new HMACSHA256(privateKey))
-                {
-                    byte[] rBytes = hmac.ComputeHash(messageHash);
-                    Array.Copy(rBytes, 0, signature, 0, 32);
-                    
-                    // Generate s part of signature
-                    byte[] sInput = new byte[64];
-                    Array.Copy(rBytes, 0, sInput, 0, 32);
-                    Array.Copy(messageHash, 0, sInput, 32, 32);
-                    byte[] sBytes = hmac.ComputeHash(sInput);
-                    Array.Copy(sBytes, 0, signature, 32, 32);
-                }
-                
-                return signature;
+                // Use the real secp256k1 library to sign the message
+                return Secp256k1.Sign(messageHash, privateKey);
             }
             catch (Exception ex)
             {
@@ -158,7 +116,6 @@ namespace Nostr.Unity
 
         /// <summary>
         /// Verifies a signature
-        /// Note: This is a placeholder implementation
         /// </summary>
         /// <param name="messageHash">The 32-byte hash of the message</param>
         /// <param name="signature">The 64-byte signature</param>
@@ -180,18 +137,14 @@ namespace Nostr.Unity
                     return false;
                 }
                 
-                if (publicKey == null || publicKey.Length != 33)
+                if (publicKey == null || (publicKey.Length != 33 && publicKey.Length != 65))
                 {
                     Debug.LogWarning("Invalid public key");
                     return false;
                 }
 
-                // NOTE: This is a placeholder - in a real implementation, 
-                // you would use proper Secp256k1 signature verification
-                Debug.LogWarning("Using placeholder verification. Replace with proper Secp256k1 implementation.");
-                
-                // For testing, always return true
-                return true;
+                // Use the real secp256k1 library to verify the signature
+                return Secp256k1.Verify(signature, messageHash, publicKey);
             }
             catch (Exception ex)
             {

@@ -49,7 +49,7 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Derives a public key from a private key
+        /// Gets a public key from a private key
         /// </summary>
         /// <param name="privateKey">The private key (hex or Bech32 format)</param>
         /// <param name="useHex">Whether to return the key in hex format (true) or Bech32 format (false)</param>
