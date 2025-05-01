@@ -1,85 +1,123 @@
-# NNostr Unity SDK
+# C# Nostr Unity SDK
 
-A Unity SDK for integrating Nostr protocol into your Unity applications.
+A Unity SDK for integrating the [Nostr protocol](https://github.com/nostr-protocol/nips) into Unity applications, enabling games to connect and interact with the Nostr network.
+
+## Features
+
+- **Key Management**: Generate new NSEC keys or securely store existing ones
+- **Relay Connections**: Connect to one or more Nostr relays
+- **Message Posting**: Publish events to the Nostr network
+- **Event Subscriptions**: Subscribe to specific event types or users
+- **Cross-Platform Support**: Works on all platforms Unity supports
 
 ## Installation
 
-Add the package to your Unity project using the Package Manager:
-1. Open Package Manager (Window > Package Manager)
-2. Click the + button
-3. Select "Add package from disk"
-4. Navigate to and select the `package.json` file
+### Option 1: Unity Package Manager (Git URL)
 
-## Usage
+1. Open your Unity project
+2. Go to `Window > Package Manager`
+3. Click the `+` button and select "Add package from git URL..."
+4. Enter `https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK.git`
+5. Click "Add"
+
+### Option 2: Manual Installation
+
+1. Download this repository
+2. Copy the contents into your Unity project's `Assets` folder
+
+## Getting Started
 
 ### Basic Setup
 
-1. Add the NostrManager component to a GameObject in your scene
-2. Configure the relay URLs in the inspector (default is "wss://relay.damus.io")
-3. Subscribe to events in your code:
-
 ```csharp
-public class NostrExample : MonoBehaviour
+using Nostr.Unity;
+
+// Initialize the Nostr client
+NostrClient client = new NostrClient();
+
+// Connect to a relay
+await client.ConnectToRelay("wss://relay.damus.io");
+
+// Generate or load keys
+NostrKeyManager keyManager = new NostrKeyManager();
+string privateKey = keyManager.GeneratePrivateKey();
+string publicKey = keyManager.GetPublicKey(privateKey);
+
+// Create and send a note
+NostrEvent noteEvent = new NostrEvent
 {
-    private NostrManager _nostrManager;
+    Kind = NostrEventKind.TextNote,
+    Content = "Hello from Unity!",
+    CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+};
 
-    void Start()
-    {
-        _nostrManager = GetComponent<NostrManager>();
-        _nostrManager.OnMessageReceived += HandleMessage;
-        _nostrManager.OnError += HandleError;
-        _nostrManager.ConnectToRelay();
-    }
+// Sign and publish the event
+noteEvent.Sign(privateKey);
+await client.PublishEvent(noteEvent);
 
-    private void HandleMessage(object sender, string message)
-    {
-        Debug.Log($"Received: {message}");
-    }
-
-    private void HandleError(object sender, Exception ex)
-    {
-        Debug.LogError($"Error: {ex.Message}");
-    }
-
-    public void SendMessage(string message)
-    {
-        _nostrManager.SendNostrMessage(message);
-    }
-
-    private void OnDestroy()
-    {
-        if (_nostrManager != null)
-        {
-            _nostrManager.DisconnectFromRelay();
-        }
-    }
-}
+// Disconnect when done
+client.Disconnect();
 ```
 
-### Features
+### Subscribing to Events
 
-- Connect to multiple Nostr relays
-- Send and receive messages
-- Automatic error handling and logging
-- Thread-safe operations
-- Proper cleanup on scene changes
+```csharp
+// Subscribe to text notes
+Filter filter = new Filter
+{
+    Kinds = new[] { NostrEventKind.TextNote },
+    Limit = 10
+};
 
-### Requirements
+string subscriptionId = client.Subscribe(filter);
+client.EventReceived += (sender, e) =>
+{
+    Debug.Log($"Received event: {e.Event.Content}");
+};
 
-- Unity 2022.3 or newer
-- .NET Standard 2.1 compatible runtime
+// Unsubscribe when no longer needed
+client.Unsubscribe(subscriptionId);
+```
 
-### API Reference
+## Advanced Usage
 
-`NostrManager` Methods:
-- `ConnectToRelay()` - Connect to configured relay(s)
-- `DisconnectFromRelay()` - Disconnect from all relays
-- `SendNostrMessage(string message)` - Send a message to connected relay(s)
+### Secure Key Storage
 
-Events:
-- `OnMessageReceived` - Fired when a message is received
-- `OnError` - Fired when an error occurs
+```csharp
+// Store keys securely (encrypted in PlayerPrefs)
+keyManager.StoreKeys(privateKey, encrypt: true);
+
+// Load previously stored keys
+string loadedPrivateKey = keyManager.LoadPrivateKey();
+```
+
+### Multiple Relay Connections
+
+```csharp
+// Connect to multiple relays
+List<string> relayUrls = new List<string>
+{
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.snort.social"
+};
+
+await client.ConnectToRelays(relayUrls);
+```
+
+## Documentation
+
+For detailed documentation, please refer to the [Wiki](https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/wiki).
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT License 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgements
+
+- [Nostr Protocol](https://github.com/nostr-protocol/nips)
+- [NativeWebSocket](https://github.com/endel/NativeWebSocket) for WebSocket communication 

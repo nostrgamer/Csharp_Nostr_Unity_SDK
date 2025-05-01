@@ -1,11 +1,31 @@
 {
-    "name": "com.nnostr.unity-sdk",
-    "version": "1.0.0",
-    "displayName": "NNostr Unity SDK",
-    "description": "Unity SDK for Nostr protocol integration",
-    "unity": "2021.3",
-    "dependencies": {
-        "com.unity.nuget.newtonsoft-json": "3.0.2",
-        "com.unity.modules.jsonserialize": "1.0.0"
+  "name": "com.nostrgamer.nostr-unity-sdk",
+  "version": "0.1.0",
+  "displayName": "Nostr Unity SDK",
+  "description": "A Unity SDK for integrating Nostr protocol into Unity applications",
+  "unity": "2021.3",
+  "documentationUrl": "https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/wiki",
+  "changelogUrl": "https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/blob/main/LICENSE",
+  "keywords": [
+    "nostr",
+    "blockchain",
+    "web3",
+    "cryptocurrency",
+    "social"
+  ],
+  "author": {
+    "name": "NostrGamer",
+    "url": "https://github.com/nostrgamer"
+  },
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.0.2"
+  },
+  "samples": [
+    {
+      "displayName": "Basic Nostr Example",
+      "description": "Contains a basic example of connecting to a Nostr relay",
+      "path": "Samples~/BasicNostrExample"
     }
+  ]
 } 

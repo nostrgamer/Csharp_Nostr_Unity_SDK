@@ -1,11 +1,7 @@
 {
-    "name": "NNostrUnitySDK",
-    "rootNamespace": "NNostrUnitySDK",
-    "references": [
-        "Unity.TextMeshPro",
-        "UnityEngine.UI",
-        "NNostrUnitySDK.Dependencies"
-    ],
+    "name": "NostrSDK",
+    "rootNamespace": "Nostr.Unity",
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

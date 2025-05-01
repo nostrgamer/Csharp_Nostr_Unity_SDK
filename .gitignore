@@ -1,18 +1,16 @@
-# Unity generated
-[Ll]ibrary/
+# Unity generated files
 [Tt]emp/
 [Oo]bj/
 [Bb]uild/
 [Bb]uilds/
+[Ll]ibrary/
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
 
-# VS/Rider/MD/Consulo generated
+# Visual Studio / Rider / VS Code files
 .vs/
 .idea/
-.gradle/
-ExportedObj/
-.consulo/
+.vscode/
 *.csproj
 *.unityproj
 *.sln
@@ -45,7 +43,7 @@ sysinfo.txt
 # Crashlytics generated file
 crashlytics-build.properties
 
-# OS generated
+# MacOS files
 .DS_Store
 .DS_Store?
 ._*
@@ -53,8 +51,13 @@ crashlytics-build.properties
 .Trashes
 Icon?
 ehthumbs.db
-Thumbs.db
+[Tt]humbs.db
 
-# Project specific
-bin/
-obj/ 
+# Windows image file caches
+[Tt]humbs.db
+[Tt]humbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+
+# Windows folder config file
+[Dd]esktop.ini 
