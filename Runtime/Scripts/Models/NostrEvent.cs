@@ -47,6 +47,9 @@ namespace Nostr.Unity
         /// </summary>
         public string Sig;
         
+        // Static instance of the NostrKeyManager for signing and verification
+        private static NostrKeyManager _keyManager = new NostrKeyManager();
+        
         /// <summary>
         /// Creates a new Nostr event with the current timestamp
         /// </summary>
@@ -68,9 +71,8 @@ namespace Nostr.Unity
                 Id = CalculateId();
             }
             
-            // TODO: Implement actual signing using Secp256k1
-            // This is a placeholder - we need to implement proper signing
-            Sig = "placeholder_signature";
+            // Sign the event ID with the private key
+            Sig = _keyManager.SignMessage(Id, privateKey);
             
             Debug.Log($"Signed event with ID: {Id}");
         }
@@ -81,9 +83,22 @@ namespace Nostr.Unity
         /// <returns>True if the signature is valid, otherwise false</returns>
         public bool Verify()
         {
-            // TODO: Implement actual verification using Secp256k1
-            // This is a placeholder - we need to implement proper verification
-            return !string.IsNullOrEmpty(Sig);
+            if (string.IsNullOrEmpty(Id) || string.IsNullOrEmpty(PubKey) || string.IsNullOrEmpty(Sig))
+            {
+                Debug.LogError("Cannot verify event: missing ID, PubKey, or Sig");
+                return false;
+            }
+            
+            // Recalculate the ID to ensure it matches
+            string calculatedId = CalculateId();
+            if (calculatedId != Id)
+            {
+                Debug.LogError($"Event ID mismatch: {calculatedId} != {Id}");
+                return false;
+            }
+            
+            // Verify the signature against the ID and public key
+            return _keyManager.VerifySignature(Id, Sig, PubKey);
         }
         
         /// <summary>

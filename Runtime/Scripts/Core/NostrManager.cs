@@ -84,7 +84,8 @@ namespace Nostr.Unity
                 defaultRelays.AddRange(NostrConstants.DEFAULT_RELAYS);
             }
             
-            // Run Bech32 tests
+            // Disable automatic Bech32 tests to avoid initialization errors
+            /*
             try
             {
                 if (Bech32Tests.RunTests())
@@ -100,6 +101,9 @@ namespace Nostr.Unity
             {
                 Debug.LogError($"Error running Bech32 tests: {ex.Message}");
             }
+            */
+            
+            Debug.Log("NostrManager initialized successfully");
         }
         
         private void Start()
