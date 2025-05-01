@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
+using Nostr.Unity.Utils;
 
 namespace Nostr.Unity
 {
@@ -18,6 +19,9 @@ namespace Nostr.Unity
         
         [SerializeField]
         private bool autoGenerateKeys = false;
+        
+        [SerializeField]
+        private bool useBech32Format = true;
         
         private NostrClient _nostrClient;
         private NostrKeyManager _keyManager;
@@ -48,6 +52,21 @@ namespace Nostr.Unity
         /// </summary>
         public string PublicKey { get; private set; }
         
+        /// <summary>
+        /// Gets the current user's private key in Bech32 format (nsec)
+        /// </summary>
+        public string PrivateKeyBech32 => PrivateKey?.ToNsec();
+        
+        /// <summary>
+        /// Gets the current user's public key in Bech32 format (npub)
+        /// </summary>
+        public string PublicKeyBech32 => PublicKey?.ToNpub();
+        
+        /// <summary>
+        /// Gets a shortened version of the public key for display purposes
+        /// </summary>
+        public string ShortPublicKey => useBech32Format ? PublicKeyBech32?.ToShortKey() : PublicKey?.ToShortKey();
+        
         private void Awake()
         {
             _nostrClient = new NostrClient();
@@ -63,6 +82,23 @@ namespace Nostr.Unity
             if (defaultRelays.Count == 0)
             {
                 defaultRelays.AddRange(NostrConstants.DEFAULT_RELAYS);
+            }
+            
+            // Run Bech32 tests
+            try
+            {
+                if (Bech32Tests.RunTests())
+                {
+                    Debug.Log("Bech32 tests completed successfully");
+                }
+                else
+                {
+                    Debug.LogWarning("Bech32 tests failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error running Bech32 tests: {ex.Message}");
             }
         }
         
@@ -80,19 +116,27 @@ namespace Nostr.Unity
         /// </summary>
         public void LoadOrCreateKeys()
         {
-            PrivateKey = _keyManager.LoadPrivateKey();
+            PrivateKey = _keyManager.LoadPrivateKey(false); // Load in hex format
             
             if (string.IsNullOrEmpty(PrivateKey) && autoGenerateKeys)
             {
                 Debug.Log("No keys found, generating new ones...");
-                PrivateKey = _keyManager.GeneratePrivateKey();
+                PrivateKey = _keyManager.GeneratePrivateKey(true); // Generate in hex format
                 _keyManager.StoreKeys(PrivateKey);
             }
             
             if (!string.IsNullOrEmpty(PrivateKey))
             {
-                PublicKey = _keyManager.GetPublicKey(PrivateKey);
-                Debug.Log($"Loaded public key: {PublicKey}");
+                PublicKey = _keyManager.GetPublicKey(PrivateKey, true); // Get in hex format
+                
+                if (useBech32Format)
+                {
+                    Debug.Log($"Loaded public key: {PublicKeyBech32} (short: {ShortPublicKey})");
+                }
+                else
+                {
+                    Debug.Log($"Loaded public key: {PublicKey} (short: {ShortPublicKey})");
+                }
             }
             else
             {
@@ -103,19 +147,34 @@ namespace Nostr.Unity
         /// <summary>
         /// Sets the user's private key
         /// </summary>
-        /// <param name="privateKey">The private key in hex format</param>
+        /// <param name="privateKey">The private key (hex or Bech32 format)</param>
         /// <param name="save">Whether to save the key to PlayerPrefs</param>
         public void SetPrivateKey(string privateKey, bool save = true)
         {
-            PrivateKey = privateKey;
-            PublicKey = _keyManager.GetPublicKey(privateKey);
+            // Convert to hex format if needed
+            string hexPrivateKey = privateKey;
+            
+            if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+            {
+                hexPrivateKey = privateKey.ToHex();
+            }
+            
+            PrivateKey = hexPrivateKey;
+            PublicKey = _keyManager.GetPublicKey(hexPrivateKey, true);
             
             if (save)
             {
-                _keyManager.StoreKeys(privateKey);
+                _keyManager.StoreKeys(hexPrivateKey);
             }
             
-            Debug.Log($"Set private key and derived public key: {PublicKey}");
+            if (useBech32Format)
+            {
+                Debug.Log($"Set private key and derived public key: {PublicKeyBech32} (short: {ShortPublicKey})");
+            }
+            else
+            {
+                Debug.Log($"Set private key and derived public key: {PublicKey} (short: {ShortPublicKey})");
+            }
         }
         
         /// <summary>

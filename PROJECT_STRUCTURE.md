@@ -68,7 +68,12 @@ WebSocket communication
 Utility classes
 
 - `Utils.meta`: Meta file for Utils folder
-- (To be implemented)
+- `Bech32.cs`: Bech32 encoding/decoding utility
+- `Bech32.cs.meta`: Meta file for Bech32.cs
+- `Bech32Tests.cs`: Tests for Bech32 encoding/decoding
+- `Bech32Tests.cs.meta`: Meta file for Bech32Tests.cs
+- `NostrExtensions.cs`: Extension methods for Nostr types
+- `NostrExtensions.cs.meta`: Meta file for NostrExtensions.cs
 
 ## Meta Files
 
@@ -79,7 +84,7 @@ For each file and folder, Unity requires a corresponding .meta file. These files
 - [x] Create README.md.meta and LICENSE.meta
 - [x] Implement WebSocketClient class
 - [x] Create Unity MonoBehaviour components for easier integration
-- [ ] Implement Bech32 encoding/decoding
+- [x] Implement Bech32 encoding/decoding
 - [ ] Add proper Secp256k1 support
 - [ ] Implement JSON serialization utilities
 - [ ] Add example scenes and documentation 
