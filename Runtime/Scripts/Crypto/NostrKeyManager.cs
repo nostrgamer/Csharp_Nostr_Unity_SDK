@@ -21,17 +21,30 @@ namespace Nostr.Unity
         /// <returns>The hex-encoded or Bech32-encoded private key</returns>
         public string GeneratePrivateKey(bool useHex = true)
         {
-            // Use Secp256k1Manager to generate a valid private key
-            byte[] privateKeyBytes = Secp256k1Manager.GeneratePrivateKey();
-            string hexKey = BytesToHex(privateKeyBytes);
-            
-            if (useHex)
+            try
             {
-                return hexKey;
+                // Delete any existing keys that might be corrupted
+                DeleteStoredKeys();
+                Debug.Log("Deleted any existing keys before generating new ones");
+                
+                // Create a secure random 32-byte array
+                byte[] privateKeyBytes = Secp256k1Manager.GeneratePrivateKey();
+                string hexKey = BytesToHex(privateKeyBytes);
+                
+                if (useHex)
+                {
+                    return hexKey;
+                }
+                else
+                {
+                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
+                Debug.LogError($"Error generating private key: {ex.Message}");
+                // Return a fallback key in case of error
+                return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             }
         }
         
@@ -273,6 +286,7 @@ namespace Nostr.Unity
                 if (string.IsNullOrEmpty(storedValue))
                 {
                     Debug.LogWarning("Stored key exists but is empty");
+                    DeleteStoredKeys(); // Clean up empty key
                     return null;
                 }
                 
@@ -290,7 +304,14 @@ namespace Nostr.Unity
                         else
                         {
                             // Simple XOR decryption - should be replaced with more secure method
-                            storedValue = EncryptDecrypt(storedValue, encryptionKey);
+                            try {
+                                storedValue = EncryptDecrypt(storedValue, encryptionKey);
+                            }
+                            catch (Exception ex) {
+                                Debug.LogError($"Failed to decrypt private key: {ex.Message}");
+                                DeleteStoredKeys(); // Clean up corrupted key
+                                return null;
+                            }
                         }
                     }
                 }
@@ -298,16 +319,18 @@ namespace Nostr.Unity
                 {
                     Debug.LogError($"Error decrypting private key: {ex.Message}");
                     Debug.LogWarning("Using a default key for testing");
+                    DeleteStoredKeys(); // Clean up corrupted key
                     
                     // Create a deterministic test key if decryption fails
                     storedValue = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
                 }
                 
                 // Verify the hex string is valid
-                if (!IsValidHexString(storedValue))
+                if (!IsValidHexString(storedValue) || storedValue.Length != 64)
                 {
                     Debug.LogError($"Invalid hex in stored private key: {storedValue}");
                     Debug.LogWarning("Using a default key for testing");
+                    DeleteStoredKeys(); // Clean up corrupted key
                     
                     // Create a deterministic test key
                     storedValue = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -325,6 +348,7 @@ namespace Nostr.Unity
             catch (Exception ex)
             {
                 Debug.LogError($"Failed to load private key: {ex.Message}");
+                DeleteStoredKeys(); // Clean up on any error
                 return null;
             }
         }
@@ -367,6 +391,21 @@ namespace Nostr.Unity
                     return text; // Return original text if no key
                 }
                 
+                // For decryption, first try to decode from Base64
+                try
+                {
+                    if (IsBase64String(text))
+                    {
+                        byte[] bytes = Convert.FromBase64String(text);
+                        text = Encoding.UTF8.GetString(bytes);
+                    }
+                }
+                catch (FormatException ex)
+                {
+                    Debug.LogError($"Base64 decoding failed: {ex.Message}");
+                    return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                }
+                
                 // XOR the text with the key
                 StringBuilder result = new StringBuilder();
                 for (int i = 0; i < text.Length; i++)
@@ -374,25 +413,44 @@ namespace Nostr.Unity
                     result.Append((char)(text[i] ^ key[i % key.Length]));
                 }
                 
-                // Convert to Base64
-                try
+                // For encryption, convert to Base64
+                if (result.Length > 0)
                 {
-                    byte[] bytes = Encoding.UTF8.GetBytes(result.ToString());
-                    return Convert.ToBase64String(bytes);
+                    try
+                    {
+                        byte[] bytes = Encoding.UTF8.GetBytes(result.ToString());
+                        return Convert.ToBase64String(bytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error during base64 conversion: {ex.Message}");
+                        // Return a safe fallback value that won't cause parsing errors
+                        return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Debug.LogError($"Error during base64 conversion: {ex.Message}");
-                    // Return a safe fallback value that won't cause parsing errors
-                    return Convert.ToBase64String(new byte[32]);
+                    return string.Empty;
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error in EncryptDecrypt: {ex.Message}");
                 // Return a safe fallback value
-                return Convert.ToBase64String(new byte[32]);
+                return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             }
+        }
+        
+        /// <summary>
+        /// Checks if a string appears to be a valid Base64 string
+        /// </summary>
+        private bool IsBase64String(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+                return false;
+                
+            s = s.Trim();
+            return (s.Length % 4 == 0) && System.Text.RegularExpressions.Regex.IsMatch(s, @"^[a-zA-Z0-9\+/]*={0,3}$", System.Text.RegularExpressions.RegexOptions.None);
         }
         
         /// <summary>

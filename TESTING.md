@@ -24,6 +24,8 @@ This guide will help you set up a simple test scene to verify the basic function
    - Add a Button for "Generate Keys"
    - Add a Button for "Connect to Relays"
    - Add a Button for "Post Test Message"
+   - Add a TMP_InputField for "NSEC Key Input"
+   - Add a Button for "Import NSEC Key"
    - Add a TextMeshPro - Text field to display status messages (requires TextMeshPro package)
 
 ## Add Nostr Manager
@@ -59,6 +61,12 @@ public class NostrTest : MonoBehaviour
     private Button postMessageButton;
     
     [SerializeField]
+    private TMP_InputField nsecInputField;
+    
+    [SerializeField]
+    private Button importNsecButton;
+    
+    [SerializeField]
     private TMP_Text statusText;
     
     private NostrManager nostrManager;
@@ -84,13 +92,43 @@ public class NostrTest : MonoBehaviour
         connectButton.onClick.AddListener(Connect);
         postMessageButton.onClick.AddListener(PostMessage);
         
-        UpdateStatus("Ready to test. Start by generating keys.");
+        // Set up NSEC import button
+        if (importNsecButton != null)
+        {
+            importNsecButton.onClick.AddListener(ImportNsecKey);
+        }
+        
+        UpdateStatus("Ready to test. Start by generating or importing keys.");
     }
     
     void GenerateKeys()
     {
         nostrManager.LoadOrCreateKeys();
         UpdateStatus("Keys loaded or generated.");
+    }
+    
+    void ImportNsecKey()
+    {
+        if (nsecInputField == null || string.IsNullOrEmpty(nsecInputField.text))
+        {
+            UpdateStatus("Please enter an NSEC key first.");
+            return;
+        }
+        
+        string nsecKey = nsecInputField.text.Trim();
+        
+        try
+        {
+            nostrManager.SetPrivateKey(nsecKey);
+            UpdateStatus($"Key imported successfully! Public key: {nostrManager.ShortPublicKey}");
+            
+            // Clear the input field for security
+            nsecInputField.text = "";
+        }
+        catch (System.Exception ex)
+        {
+            UpdateStatus($"Error importing key: {ex.Message}");
+        }
     }
     
     void Connect()
@@ -156,19 +194,25 @@ public class NostrTest : MonoBehaviour
    - Drag your "Generate Keys" button to the "Generate Keys Button" field
    - Drag your "Connect" button to the "Connect Button" field
    - Drag your "Post Message" button to the "Post Message Button" field
+   - Drag your NSEC input field to the "Nsec Input Field" field
+   - Drag your "Import NSEC" button to the "Import Nsec Button" field
    - Drag your TMP_Text to the "Status Text" field
 
 ## Test the Implementation
 
 1. Run the scene
-2. Click "Generate Keys" - this should generate a new key pair
-3. Click "Connect to Relays" - this should simulate connecting to relays
-4. Click "Post Message" - this should simulate posting a message
+2. You can either:
+   - Click "Generate Keys" - this should generate a new key pair, or
+   - Enter an NSEC key into the input field and click "Import NSEC Key" 
+3. Click "Connect to Relays" - this should connect to relays
+4. Click "Post Message" - this should post a message to connected relays
 
-Note that this test will only simulate the operations as the actual WebSocket implementation and cryptography are placeholder implementations at this stage.
+Note that the WebSocket connection will attempt to connect to real relays, but the cryptography implementation is a placeholder at this stage.
 
 ## Expected Results
 
 - The console should show debug messages for each operation
 - The status text should update with each action
-- No errors should appear in the console (except for warnings about unused events) 
+- When importing an NSEC key, you should see the derived public key
+- When connecting to relays, you should see connection status messages
+- When posting a message, you should see confirmation in the status text 
