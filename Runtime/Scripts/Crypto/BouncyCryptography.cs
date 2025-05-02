@@ -7,6 +7,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
+using Nostr.Unity.Crypto.Recovery;
 
 namespace Nostr.Unity
 {
@@ -223,12 +224,46 @@ namespace Nostr.Unity
         /// </summary>
         /// <param name="messageHash">The 32-byte hash of the message to sign</param>
         /// <param name="privateKey">The 32-byte private key to sign with</param>
-        /// <returns>The 64-byte signature with recovery info</returns>
+        /// <returns>The 65-byte signature with recovery info</returns>
         public byte[] SignRecoverable(byte[] messageHash, byte[] privateKey)
         {
-            // For now, this just returns a regular signature
-            // Proper recoverable signature implementation will be added
-            return Sign(messageHash, privateKey);
+            try
+            {
+                if (messageHash == null || messageHash.Length != 32)
+                {
+                    throw new ArgumentException("Message hash must be 32 bytes");
+                }
+
+                if (privateKey == null || privateKey.Length != 32)
+                {
+                    throw new ArgumentException("Private key must be 32 bytes");
+                }
+
+                BouncyCastleManager.EnsureInitialized();
+
+                // Generate a regular signature first
+                byte[] signature = Sign(messageHash, privateKey);
+
+                // Extract r and s components
+                byte[] r = new byte[32];
+                byte[] s = new byte[32];
+                Buffer.BlockCopy(signature, 0, r, 0, 32);
+                Buffer.BlockCopy(signature, 32, s, 0, 32);
+
+                // Get the public key for recovery
+                byte[] publicKey = GetPublicKey(privateKey);
+
+                // Create recoverable signature with r, s, messageHash, and publicKey
+                var recoverableSignature = new NostrRecoverableSignature(r, s, messageHash, publicKey);
+
+                // Return 65-byte recoverable signature
+                return recoverableSignature.RecoverableSignature;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error creating recoverable signature: {ex.Message}");
+                throw new CryptographicException("Failed to create recoverable signature", ex);
+            }
         }
 
         /// <summary>

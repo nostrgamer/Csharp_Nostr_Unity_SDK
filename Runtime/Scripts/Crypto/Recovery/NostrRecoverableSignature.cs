@@ -1,14 +1,10 @@
 using System;
 using System.Security.Cryptography;
 using UnityEngine;
-
-// These will be commented out until the BouncyCastle library is added
-/*
 using Org.BouncyCastle.Asn1.Sec;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC;
-*/
 
 namespace Nostr.Unity.Crypto.Recovery
 {
@@ -115,7 +111,6 @@ namespace Nostr.Unity.Crypto.Recovery
         /// <returns>The recovery ID (0, 1, 2, or 3)</returns>
         private byte ComputeRecoveryId(byte[] signature, byte[] messageHash, byte[] expectedPublicKey)
         {
-            /* Will be uncommented when BouncyCastle is available
             try
             {
                 // Extract r and s values from the signature
@@ -164,13 +159,8 @@ namespace Nostr.Unity.Crypto.Recovery
                 Debug.LogError($"Error computing recovery ID: {ex.Message}");
                 return 0; // Default to 0 as a fallback
             }
-            */
-            
-            // Temporary placeholder
-            return 0;
         }
         
-        /* Will be uncommented when BouncyCastle is available
         /// <summary>
         /// Recovers the public key from a signature, message hash, and recovery ID
         /// </summary>
@@ -228,6 +218,5 @@ namespace Nostr.Unity.Crypto.Recovery
             
             return true;
         }
-        */
     }
 } 

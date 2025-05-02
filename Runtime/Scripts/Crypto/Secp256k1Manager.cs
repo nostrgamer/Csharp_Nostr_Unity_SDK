@@ -2,6 +2,10 @@ using System;
 using System.Security.Cryptography;
 using UnityEngine;
 using Nostr.Unity.Crypto.Recovery;
+using Org.BouncyCastle.Asn1.Sec;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Math.EC;
 
 namespace Nostr.Unity
 {
@@ -233,10 +237,77 @@ namespace Nostr.Unity
                 throw new ArgumentException("Message hash must be 32 bytes");
             }
             
-            // The proper implementation will be added when BouncyCastle is available
-            // For now, we just return a placeholder
-            Debug.LogWarning("Public key recovery is not yet implemented");
-            return new byte[33] { 0x02 };
+            try
+            {
+                // Extract the recovery ID and signature components
+                byte recoveryId = recoverySignature[0];
+                if (recoveryId > 3)
+                {
+                    throw new ArgumentException("Invalid recovery ID: " + recoveryId);
+                }
+                
+                // Extract r and s values from the signature
+                byte[] rBytes = new byte[32];
+                byte[] sBytes = new byte[32];
+                Buffer.BlockCopy(recoverySignature, 1, rBytes, 0, 32);
+                Buffer.BlockCopy(recoverySignature, 33, sBytes, 0, 32);
+                
+                BigInteger r = new BigInteger(1, rBytes);
+                BigInteger s = new BigInteger(1, sBytes);
+                
+                // Get the secp256k1 curve parameters
+                var curve = SecNamedCurves.GetByName("secp256k1");
+                var curveParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
+                
+                // Decode recovery ID flags
+                bool isYEven = (recoveryId & 1) == 0;
+                bool isSecondKey = (recoveryId >> 1) == 1;
+                
+                // Convert message hash to BigInteger
+                BigInteger e = new BigInteger(1, messageHash);
+                
+                // Get curve order
+                BigInteger n = curveParams.N;
+                
+                // If second key, add curve order to r
+                BigInteger x = isSecondKey ? r.Add(n) : r;
+                
+                // Find the curve point with x coordinate
+                ECCurve secp256k1Curve = curveParams.Curve;
+                ECFieldElement xFieldElement = secp256k1Curve.FromBigInteger(x);
+                
+                // Calculate y coordinate (y² = x³ + 7 for secp256k1)
+                ECFieldElement alpha = xFieldElement.Multiply(xFieldElement.Square().Add(secp256k1Curve.FromBigInteger(new BigInteger("7"))));
+                ECFieldElement beta = alpha.Sqrt();
+                
+                if (beta == null)
+                {
+                    throw new InvalidOperationException("Invalid signature: cannot recover public key");
+                }
+                
+                // Choose correct y coordinate based on isYEven
+                bool betaIsEven = !beta.ToBigInteger().TestBit(0);
+                ECFieldElement y = betaIsEven == isYEven ? beta : secp256k1Curve.FromBigInteger(secp256k1Curve.Q.Subtract(beta.ToBigInteger()));
+                
+                // Create point R
+                ECPoint R = secp256k1Curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
+                
+                // Calculate public key Q = (s * R - e * G) / r
+                ECPoint G = curveParams.G;
+                BigInteger rInverse = r.ModInverse(n);
+                
+                // Different calculation method to avoid inverting r twice
+                // Q = r^-1 (sR - eG)
+                ECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
+                
+                // Convert to compressed format (33 bytes)
+                return Q.GetEncoded(true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error recovering public key: {ex.Message}");
+                throw new CryptographicException("Failed to recover public key", ex);
+            }
         }
 
         /// <summary>
