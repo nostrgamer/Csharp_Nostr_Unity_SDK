@@ -7,21 +7,11 @@ using Nostr.Unity.Crypto;
 namespace Nostr.Unity
 {
     /// <summary>
-    /// Flags for secp256k1 operations
-    /// </summary>
-    public enum Secp256k1Flags
-    {
-        SECP256K1_EC_COMPRESSED = (1 << 1),
-        SECP256K1_EC_UNCOMPRESSED = (0 << 1)
-    }
-    
-    /// <summary>
     /// Manages Secp256k1 cryptographic operations for Nostr
     /// </summary>
     public static class Secp256k1Manager
     {
         private static bool _isInitialized = false;
-        private static bool _usingBouncyCastle = true;
         
         /// <summary>
         /// Initializes the Secp256k1 library
@@ -33,10 +23,7 @@ namespace Nostr.Unity
                 if (_isInitialized)
                     return true;
                 
-                // We default to using BouncyCastle implementation now
                 _isInitialized = true;
-                _usingBouncyCastle = true;
-                
                 Debug.Log("Secp256k1 BouncyCastle implementation initialized");
                 return true;
             }
@@ -70,7 +57,6 @@ namespace Nostr.Unity
                     throw new InvalidOperationException("Secp256k1 library is not initialized");
                 }
                 
-                // Always use BouncyCastle implementation
                 return Secp256k1BouncyCastleManager.GeneratePrivateKey();
             }
             catch (Exception ex)
@@ -100,7 +86,6 @@ namespace Nostr.Unity
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
                 
-                // Always use BouncyCastle implementation
                 return Secp256k1BouncyCastleManager.GetPublicKey(privateKey);
             }
             catch (Exception ex)
@@ -118,7 +103,6 @@ namespace Nostr.Unity
         /// <returns>The 32-byte hash of the message</returns>
         public static byte[] ComputeMessageHash(string message)
         {
-            // Both implementations use the same SHA256 method
             return Secp256k1BouncyCastleManager.ComputeMessageHash(message);
         }
 
@@ -147,7 +131,6 @@ namespace Nostr.Unity
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
                 
-                // Always use BouncyCastle implementation
                 return Secp256k1BouncyCastleManager.Sign(messageHash, privateKey);
             }
             catch (Exception ex)
@@ -189,7 +172,6 @@ namespace Nostr.Unity
                     throw new ArgumentException("Public key must be 33 bytes (compressed format)");
                 }
                 
-                // Always use BouncyCastle implementation
                 return Secp256k1BouncyCastleManager.Verify(messageHash, signature, publicKey);
             }
             catch (Exception ex)
@@ -198,15 +180,6 @@ namespace Nostr.Unity
                 // If an error occurs, use the fallback implementation
                 return Secp256k1FallbackManager.Verify(messageHash, signature, publicKey);
             }
-        }
-
-        /// <summary>
-        /// Checks if we're using the BouncyCastle implementation
-        /// </summary>
-        public static bool IsUsingBouncyCastle()
-        {
-            EnsureInitialized();
-            return _usingBouncyCastle;
         }
 
         /// <summary>

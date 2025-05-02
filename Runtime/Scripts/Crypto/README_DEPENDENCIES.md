@@ -2,9 +2,9 @@
 
 ## BouncyCastle
 
-This project uses BouncyCastle for secp256k1 cryptography. You need to add the BouncyCastle DLL to your project:
+This project uses BouncyCastle for secp256k1 cryptography. You need to add the BouncyCastle DLL to your project before using the crypto features:
 
-### Manual Installation
+### Manual Installation (Recommended)
 
 1. Download the BouncyCastle DLL from the official website: [https://www.bouncycastle.org/csharp/](https://www.bouncycastle.org/csharp/)
 2. Download "BouncyCastle.Crypto.dll" (not the signed version)
@@ -21,10 +21,10 @@ Install-Package BouncyCastle.NetCore
 
 ## Secp256k1 Implementation
 
-The project uses a pure C# implementation of secp256k1 via BouncyCastle. This implementation:
+This library uses a pure C# implementation of secp256k1 via BouncyCastle, which has several advantages:
 
-1. Does not require any native libraries
-2. Works on all platforms including mobile and WebGL
-3. Provides all necessary cryptographic functionality for Nostr
+1. No native dependencies - works on all platforms including mobile and WebGL
+2. Well-established and widely used cryptography library
+3. Provides all necessary functionality for Nostr (key generation, signing, verification)
 
-If BouncyCastle is not available for any reason, the system will fall back to a simplified implementation that provides the same API but with limited security guarantees. 
+If for some reason the BouncyCastle implementation fails, the system will fall back to a simplified implementation that provides basic functionality for development, but it's not recommended for production use. 

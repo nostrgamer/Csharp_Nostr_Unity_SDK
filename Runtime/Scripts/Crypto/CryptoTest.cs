@@ -56,9 +56,6 @@ namespace Nostr.Unity
                 SignatureValid = Secp256k1Manager.Verify(messageHash, signature, publicKey);
                 Debug.Log($"Signature valid: {SignatureValid}");
                 
-                // Log which implementation is being used
-                Debug.Log($"Using BouncyCastle implementation: {Secp256k1Manager.IsUsingBouncyCastle()}");
-                
                 Debug.Log("Crypto test completed successfully");
             }
             catch (Exception ex)
