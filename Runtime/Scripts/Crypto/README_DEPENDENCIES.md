@@ -1,30 +1,35 @@
 # Cryptography Dependencies
 
-## BouncyCastle
+## BouncyCastle Library (REQUIRED)
 
-This project uses BouncyCastle for secp256k1 cryptography. You need to add the BouncyCastle DLL to your project before using the crypto features:
+This project **requires** the BouncyCastle library for secp256k1 cryptography. 
 
-### Manual Installation (Recommended)
+**IMPORTANT:** The crypto functionality will not work without this library.
+
+### Installation Steps
 
 1. Download the BouncyCastle DLL from the official website: [https://www.bouncycastle.org/csharp/](https://www.bouncycastle.org/csharp/)
-2. Download "BouncyCastle.Crypto.dll" (not the signed version)
+2. Download the "BouncyCastle.Crypto.dll" file (not the signed version)
 3. Copy the DLL to your Unity project's `Assets/Plugins` folder
 4. If the `Plugins` folder doesn't exist, create it first
 
-### NuGet Installation (Alternative)
+### Installation Verification
 
-If you're using Unity with .NET 4.x or higher, you can also add BouncyCastle through NuGet:
+After installing the DLL, you can verify it's working correctly by:
 
-```
-Install-Package BouncyCastle.NetCore
-```
+1. Running the `CryptoTest.cs` script in your Unity project
+2. Check that key generation, signing, and verification work without errors
 
-## Secp256k1 Implementation
+## About the Implementation
 
-This library uses a pure C# implementation of secp256k1 via BouncyCastle, which has several advantages:
+This library uses a pure C# implementation of secp256k1 via BouncyCastle, which offers:
 
 1. No native dependencies - works on all platforms including mobile and WebGL
-2. Well-established and widely used cryptography library
-3. Provides all necessary functionality for Nostr (key generation, signing, verification)
+2. Industry-standard cryptography that's widely used and reviewed
+3. Full implementation of the secp256k1 curve needed for Nostr
 
-If for some reason the BouncyCastle implementation fails, the system will fall back to a simplified implementation that provides basic functionality for development, but it's not recommended for production use. 
+## Technical Details
+
+- The implementation is in `Secp256k1BouncyCastleManager.cs`
+- The public API is provided through `Secp256k1Manager.cs`
+- All cryptographic operations require initialization via `Secp256k1Manager.Initialize()` 

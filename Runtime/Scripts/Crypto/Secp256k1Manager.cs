@@ -50,21 +50,12 @@ namespace Nostr.Unity
         /// <returns>A 32-byte array representing the private key</returns>
         public static byte[] GeneratePrivateKey()
         {
-            try
+            if (!EnsureInitialized())
             {
-                if (!EnsureInitialized())
-                {
-                    throw new InvalidOperationException("Secp256k1 library is not initialized");
-                }
-                
-                return Secp256k1BouncyCastleManager.GeneratePrivateKey();
+                throw new InvalidOperationException("Secp256k1 library is not initialized");
             }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error generating private key: {ex.Message}");
-                // If an error occurs, try to generate a key anyway
-                return Secp256k1FallbackManager.GeneratePrivateKey();
-            }
+            
+            return Secp256k1BouncyCastleManager.GeneratePrivateKey();
         }
 
         /// <summary>
@@ -74,26 +65,17 @@ namespace Nostr.Unity
         /// <returns>The public key (33 bytes compressed)</returns>
         public static byte[] GetPublicKey(byte[] privateKey)
         {
-            try
+            if (!EnsureInitialized())
             {
-                if (!EnsureInitialized())
-                {
-                    throw new InvalidOperationException("Secp256k1 library is not initialized");
-                }
-                
-                if (privateKey == null || privateKey.Length != 32)
-                {
-                    throw new ArgumentException("Private key must be 32 bytes");
-                }
-                
-                return Secp256k1BouncyCastleManager.GetPublicKey(privateKey);
+                throw new InvalidOperationException("Secp256k1 library is not initialized");
             }
-            catch (Exception ex)
+            
+            if (privateKey == null || privateKey.Length != 32)
             {
-                Debug.LogError($"Error deriving public key: {ex.Message}");
-                // If an error occurs, use the fallback implementation
-                return Secp256k1FallbackManager.GetPublicKey(privateKey);
+                throw new ArgumentException("Private key must be 32 bytes");
             }
+            
+            return Secp256k1BouncyCastleManager.GetPublicKey(privateKey);
         }
 
         /// <summary>
@@ -114,31 +96,22 @@ namespace Nostr.Unity
         /// <returns>The 64-byte signature</returns>
         public static byte[] Sign(byte[] messageHash, byte[] privateKey)
         {
-            try
+            if (!EnsureInitialized())
             {
-                if (!EnsureInitialized())
-                {
-                    throw new InvalidOperationException("Secp256k1 library is not initialized");
-                }
-                
-                if (messageHash == null || messageHash.Length != 32)
-                {
-                    throw new ArgumentException("Message hash must be 32 bytes");
-                }
-                
-                if (privateKey == null || privateKey.Length != 32)
-                {
-                    throw new ArgumentException("Private key must be 32 bytes");
-                }
-                
-                return Secp256k1BouncyCastleManager.Sign(messageHash, privateKey);
+                throw new InvalidOperationException("Secp256k1 library is not initialized");
             }
-            catch (Exception ex)
+            
+            if (messageHash == null || messageHash.Length != 32)
             {
-                Debug.LogError($"Error signing message: {ex.Message}");
-                // If an error occurs, use the fallback implementation
-                return Secp256k1FallbackManager.Sign(messageHash, privateKey);
+                throw new ArgumentException("Message hash must be 32 bytes");
             }
+            
+            if (privateKey == null || privateKey.Length != 32)
+            {
+                throw new ArgumentException("Private key must be 32 bytes");
+            }
+            
+            return Secp256k1BouncyCastleManager.Sign(messageHash, privateKey);
         }
 
         /// <summary>
@@ -150,36 +123,27 @@ namespace Nostr.Unity
         /// <returns>True if the signature is valid, otherwise false</returns>
         public static bool Verify(byte[] messageHash, byte[] signature, byte[] publicKey)
         {
-            try
+            if (!EnsureInitialized())
             {
-                if (!EnsureInitialized())
-                {
-                    throw new InvalidOperationException("Secp256k1 library is not initialized");
-                }
-                
-                if (messageHash == null || messageHash.Length != 32)
-                {
-                    throw new ArgumentException("Message hash must be 32 bytes");
-                }
-                
-                if (signature == null || signature.Length != 64)
-                {
-                    throw new ArgumentException("Signature must be 64 bytes");
-                }
-                
-                if (publicKey == null || publicKey.Length != 33)
-                {
-                    throw new ArgumentException("Public key must be 33 bytes (compressed format)");
-                }
-                
-                return Secp256k1BouncyCastleManager.Verify(messageHash, signature, publicKey);
+                throw new InvalidOperationException("Secp256k1 library is not initialized");
             }
-            catch (Exception ex)
+            
+            if (messageHash == null || messageHash.Length != 32)
             {
-                Debug.LogError($"Error verifying signature: {ex.Message}");
-                // If an error occurs, use the fallback implementation
-                return Secp256k1FallbackManager.Verify(messageHash, signature, publicKey);
+                throw new ArgumentException("Message hash must be 32 bytes");
             }
+            
+            if (signature == null || signature.Length != 64)
+            {
+                throw new ArgumentException("Signature must be 64 bytes");
+            }
+            
+            if (publicKey == null || publicKey.Length != 33)
+            {
+                throw new ArgumentException("Public key must be 33 bytes (compressed format)");
+            }
+            
+            return Secp256k1BouncyCastleManager.Verify(messageHash, signature, publicKey);
         }
 
         /// <summary>
