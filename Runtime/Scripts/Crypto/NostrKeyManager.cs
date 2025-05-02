@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 using Nostr.Unity.Utils;
+using System.IO;
 
 namespace Nostr.Unity
 {
@@ -13,6 +14,9 @@ namespace Nostr.Unity
     {
         private const string NSEC_KEY = "NOSTR_NSEC";
         private const string ENCRYPTION_KEY = "NOSTR_ENCRYPTION_KEY";
+        private const string KEY_STORAGE_PATH = "nostr_keys";
+        private const string PRIVATE_KEY_FILE = "private_key";
+        private const string PUBLIC_KEY_FILE = "public_key";
         
         /// <summary>
         /// Generates a new private key
@@ -23,28 +27,18 @@ namespace Nostr.Unity
         {
             try
             {
-                // Delete any existing keys that might be corrupted
-                DeleteStoredKeys();
-                Debug.Log("Deleted any existing keys before generating new ones");
-                
-                // Create a secure random 32-byte array
-                byte[] privateKeyBytes = Secp256k1Manager.GeneratePrivateKey();
-                string hexKey = BytesToHex(privateKeyBytes);
-                
-                if (useHex)
+                byte[] privateKey = new byte[32];
+                using (var rng = RandomNumberGenerator.Create())
                 {
-                    return hexKey;
+                    rng.GetBytes(privateKey);
                 }
-                else
-                {
-                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
-                }
+                
+                return useHex ? BytesToHex(privateKey) : Convert.ToBase64String(privateKey);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error generating private key: {ex.Message}");
-                // Return a fallback key in case of error
-                return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                throw;
             }
         }
         
@@ -55,166 +49,6 @@ namespace Nostr.Unity
         /// <param name="useHex">Whether to return the key in hex format (true) or Bech32 format (false)</param>
         /// <returns>The hex-encoded or Bech32-encoded public key</returns>
         public string GetPublicKey(string privateKey, bool useHex = true)
-        {
-            string hexPrivateKey = privateKey;
-            
-            // Check if the key is in Bech32 format
-            if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
-            {
-                try
-                {
-                    (string prefix, string data) = Bech32.DecodeToHex(privateKey);
-                    if (prefix != NostrConstants.NSEC_PREFIX)
-                    {
-                        throw new ArgumentException("Invalid nsec prefix");
-                    }
-                    hexPrivateKey = data;
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error decoding Bech32 private key: {ex.Message}");
-                    throw;
-                }
-            }
-            
-            // Use Secp256k1Manager to derive the public key
-            byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
-            byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
-            
-            // Secp256k1.Net returns 33-byte compressed public keys
-            // For Nostr, we need 32-byte public keys (the x-coordinate without the compression prefix)
-            byte[] nostrPublicKeyBytes;
-            
-            if (publicKeyBytes.Length == 33)
-            {
-                // Remove the compression prefix (first byte)
-                nostrPublicKeyBytes = new byte[32];
-                Array.Copy(publicKeyBytes, 1, nostrPublicKeyBytes, 0, 32);
-            }
-            else
-            {
-                // Unexpected format, use as-is
-                nostrPublicKeyBytes = publicKeyBytes;
-                Debug.LogWarning($"Unexpected public key format: {publicKeyBytes.Length} bytes");
-            }
-            
-            string hexPublicKey = BytesToHex(nostrPublicKeyBytes);
-            
-            if (useHex)
-            {
-                return hexPublicKey;
-            }
-            else
-            {
-                return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, hexPublicKey);
-            }
-        }
-        
-        /// <summary>
-        /// Signs a message with a private key
-        /// </summary>
-        /// <param name="message">The message to sign</param>
-        /// <param name="privateKey">The private key to sign with (hex or Bech32 format)</param>
-        /// <returns>The signature as a hex string</returns>
-        public string SignMessage(string message, string privateKey)
-        {
-            // Convert private key to hex if needed
-            string hexPrivateKey = privateKey;
-            
-            if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
-            {
-                try
-                {
-                    (string prefix, string data) = Bech32.DecodeToHex(privateKey);
-                    if (prefix != NostrConstants.NSEC_PREFIX)
-                    {
-                        throw new ArgumentException("Invalid nsec prefix");
-                    }
-                    hexPrivateKey = data;
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error decoding Bech32 private key: {ex.Message}");
-                    throw;
-                }
-            }
-            
-            // Compute the SHA256 hash of the message
-            byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
-            
-            // Sign the message hash with the private key
-            byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
-            byte[] signature = Secp256k1Manager.Sign(messageHash, privateKeyBytes);
-            
-            // Return the signature as a hex string
-            return BytesToHex(signature);
-        }
-        
-        /// <summary>
-        /// Verifies a signature
-        /// </summary>
-        /// <param name="message">The original message</param>
-        /// <param name="signature">The signature as a hex string</param>
-        /// <param name="publicKey">The public key (hex or Bech32 format)</param>
-        /// <returns>True if the signature is valid, otherwise false</returns>
-        public bool VerifySignature(string message, string signature, string publicKey)
-        {
-            try
-            {
-                // Convert public key to hex if needed
-                string hexPublicKey = publicKey;
-                
-                if (publicKey.StartsWith(NostrConstants.NPUB_PREFIX + "1"))
-                {
-                    try
-                    {
-                        (string prefix, string data) = Bech32.DecodeToHex(publicKey);
-                        if (prefix != NostrConstants.NPUB_PREFIX)
-                        {
-                            throw new ArgumentException("Invalid npub prefix");
-                        }
-                        hexPublicKey = data;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"Error decoding Bech32 public key: {ex.Message}");
-                        throw;
-                    }
-                }
-                
-                // Compute the SHA256 hash of the message
-                byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
-                
-                // Convert hex strings to bytes
-                byte[] signatureBytes = HexToBytes(signature);
-                byte[] publicKeyBytes = HexToBytes(hexPublicKey);
-                
-                // Add compression prefix if needed (Nostr uses 32-byte raw public keys)
-                if (publicKeyBytes.Length == 32)
-                {
-                    byte[] compressedKey = new byte[33];
-                    compressedKey[0] = 0x02; // Assume even y-coordinate for simplicity
-                    Array.Copy(publicKeyBytes, 0, compressedKey, 1, 32);
-                    publicKeyBytes = compressedKey;
-                }
-                
-                // Verify the signature
-                return Secp256k1Manager.Verify(messageHash, signatureBytes, publicKeyBytes);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error verifying signature: {ex.Message}");
-                return false;
-            }
-        }
-        
-        /// <summary>
-        /// Stores the private key in PlayerPrefs
-        /// </summary>
-        /// <param name="privateKey">The private key to store (hex or Bech32 format)</param>
-        /// <param name="encrypt">Whether to encrypt the key in storage</param>
-        /// <returns>True if successful, otherwise false</returns>
-        public bool StoreKeys(string privateKey, bool encrypt = true)
         {
             try
             {
@@ -239,29 +73,223 @@ namespace Nostr.Unity
                     }
                 }
                 
-                string valueToStore = hexPrivateKey;
+                // Use Secp256k1Manager to derive the public key
+                byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
+                byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
                 
-                if (encrypt)
+                // Secp256k1.Net returns 33-byte compressed public keys
+                // For Nostr, we need 32-byte public keys (the x-coordinate without the compression prefix)
+                byte[] nostrPublicKeyBytes;
+                
+                if (publicKeyBytes.Length == 33)
                 {
-                    // Generate encryption key if not exists
-                    if (!PlayerPrefs.HasKey(ENCRYPTION_KEY))
-                    {
-                        string newEncryptionKey = Guid.NewGuid().ToString();
-                        PlayerPrefs.SetString(ENCRYPTION_KEY, newEncryptionKey);
-                    }
-                    
-                    // Simple XOR encryption - should be replaced with more secure method
-                    string savedEncryptionKey = PlayerPrefs.GetString(ENCRYPTION_KEY);
-                    valueToStore = EncryptDecrypt(hexPrivateKey, savedEncryptionKey);
+                    // Remove the compression prefix (first byte)
+                    nostrPublicKeyBytes = new byte[32];
+                    Array.Copy(publicKeyBytes, 1, nostrPublicKeyBytes, 0, 32);
+                }
+                else
+                {
+                    // Unexpected format, use as-is
+                    nostrPublicKeyBytes = publicKeyBytes;
+                    Debug.LogWarning($"Unexpected public key format: {publicKeyBytes.Length} bytes");
                 }
                 
-                PlayerPrefs.SetString(NSEC_KEY, valueToStore);
-                PlayerPrefs.Save();
+                string hexPublicKey = BytesToHex(nostrPublicKeyBytes);
+                
+                if (useHex)
+                {
+                    return hexPublicKey;
+                }
+                else
+                {
+                    return hexPublicKey.ToNpub();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error getting public key: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Signs a message with a private key
+        /// </summary>
+        /// <param name="message">The message to sign</param>
+        /// <param name="privateKey">The private key to sign with (hex or Bech32 format)</param>
+        /// <returns>The signature as a hex string</returns>
+        public string SignMessage(string message, string privateKey)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(message))
+                    throw new ArgumentException("Message cannot be null or empty", nameof(message));
+                
+                if (string.IsNullOrEmpty(privateKey))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
+                
+                string hexPrivateKey = privateKey;
+                
+                // Check if the key is in Bech32 format
+                if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+                {
+                    try
+                    {
+                        (string prefix, string data) = Bech32.DecodeToHex(privateKey);
+                        if (prefix != NostrConstants.NSEC_PREFIX)
+                        {
+                            throw new ArgumentException("Invalid nsec prefix");
+                        }
+                        hexPrivateKey = data;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error decoding Bech32 private key: {ex.Message}");
+                        throw;
+                    }
+                }
+                
+                // Convert the message to bytes
+                byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+                
+                // Compute the message hash
+                byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
+                
+                // Convert the private key to bytes
+                byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
+                
+                // Generate the signature
+                byte[] signatureBytes = Secp256k1Manager.Sign(messageHash, privateKeyBytes);
+                
+                // Convert to hex
+                return BytesToHex(signatureBytes);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error signing message: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Verifies a signature
+        /// </summary>
+        /// <param name="message">The original message</param>
+        /// <param name="signature">The signature as a hex string</param>
+        /// <param name="publicKey">The public key (hex or Bech32 format)</param>
+        /// <returns>True if the signature is valid, otherwise false</returns>
+        public bool VerifySignature(string message, string signature, string publicKey)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(message))
+                    throw new ArgumentException("Message cannot be null or empty", nameof(message));
+                
+                if (string.IsNullOrEmpty(signature))
+                    throw new ArgumentException("Signature cannot be null or empty", nameof(signature));
+                
+                if (string.IsNullOrEmpty(publicKey))
+                    throw new ArgumentException("Public key cannot be null or empty", nameof(publicKey));
+                
+                string hexPublicKey = publicKey;
+                
+                // Check if the key is in Bech32 format
+                if (publicKey.StartsWith(NostrConstants.NPUB_PREFIX + "1"))
+                {
+                    try
+                    {
+                        (string prefix, string data) = Bech32.DecodeToHex(publicKey);
+                        if (prefix != NostrConstants.NPUB_PREFIX)
+                        {
+                            throw new ArgumentException("Invalid npub prefix");
+                        }
+                        hexPublicKey = data;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error decoding Bech32 public key: {ex.Message}");
+                        return false;
+                    }
+                }
+                
+                // Compute the message hash
+                byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
+                
+                // Convert the signature to bytes
+                byte[] signatureBytes = HexToBytes(signature);
+                
+                // Convert the public key to bytes
+                byte[] publicKeyBytes = HexToBytes(hexPublicKey);
+                
+                // Verify the signature
+                return Secp256k1Manager.Verify(messageHash, signatureBytes, publicKeyBytes);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error verifying signature: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Stores the keys with optional encryption
+        /// </summary>
+        /// <param name="privateKey">The private key to store</param>
+        /// <param name="encrypt">Whether to encrypt the keys</param>
+        /// <param name="password">Optional password for encryption</param>
+        /// <returns>True if the keys were stored successfully</returns>
+        public bool StoreKeys(string privateKey, bool encrypt = false, string password = null)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(privateKey))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
+                
+                // Security warning
+                if (!encrypt)
+                {
+                    Debug.LogWarning("WARNING: Storing private keys without encryption is not recommended. " +
+                        "Anyone with access to the application's data directory could access your private keys. " +
+                        "Please use encryption with a strong password for production use.");
+                }
+                else if (string.IsNullOrEmpty(password))
+                {
+                    Debug.LogWarning("WARNING: Encryption is enabled but no password was provided. " +
+                        "The keys will be stored with a default encryption key. " +
+                        "This is not secure for production use.");
+                }
+                
+                // Get the public key
+                string publicKey = GetPublicKey(privateKey);
+                
+                // Create the storage directory if it doesn't exist
+                string storagePath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH);
+                Directory.CreateDirectory(storagePath);
+                
+                // Store the private key
+                string privateKeyPath = Path.Combine(storagePath, PRIVATE_KEY_FILE);
+                if (encrypt)
+                {
+                    if (string.IsNullOrEmpty(password))
+                    {
+                        Debug.LogWarning("No password provided for encryption. Keys will be stored unencrypted.");
+                    }
+                    else
+                    {
+                        privateKey = EncryptKey(privateKey, password);
+                    }
+                }
+                File.WriteAllText(privateKeyPath, privateKey);
+                
+                // Store the public key
+                string publicKeyPath = Path.Combine(storagePath, PUBLIC_KEY_FILE);
+                File.WriteAllText(publicKeyPath, publicKey);
+                
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Failed to store keys: {ex.Message}");
+                Debug.LogError($"Error storing keys: {ex.Message}");
                 return false;
             }
         }
@@ -458,7 +486,30 @@ namespace Nostr.Unity
         /// </summary>
         private byte[] HexToBytes(string hex)
         {
-            return Bech32.HexToBytes(hex);
+            if (string.IsNullOrEmpty(hex))
+            {
+                return new byte[0];
+            }
+            
+            // Remove 0x prefix if present
+            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                hex = hex.Substring(2);
+            }
+            
+            // Ensure even length
+            if (hex.Length % 2 != 0)
+            {
+                hex = "0" + hex;
+            }
+            
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            }
+            
+            return bytes;
         }
         
         /// <summary>
@@ -466,7 +517,17 @@ namespace Nostr.Unity
         /// </summary>
         private string BytesToHex(byte[] bytes)
         {
-            return Bech32.BytesToHex(bytes);
+            if (bytes == null || bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+            
+            StringBuilder hex = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes)
+            {
+                hex.AppendFormat("{0:x2}", b);
+            }
+            return hex.ToString();
         }
         
         /// <summary>
