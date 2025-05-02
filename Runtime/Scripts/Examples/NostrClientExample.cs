@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System;
 using System.Threading.Tasks;
+using System.Collections;
 
 namespace Nostr.Unity.Examples
 {
@@ -71,12 +72,12 @@ namespace Nostr.Unity.Examples
             _client.Error += OnError;
             
             // Connect to relays
-            ConnectToRelays();
+            StartCoroutine(ConnectToRelays());
             
             // Set up UI button
             if (sendButton != null && messageInput != null)
             {
-                sendButton.onClick.AddListener(SendMessage);
+                sendButton.onClick.AddListener(() => StartCoroutine(SendMessage()));
             }
             
             // Run a basic cryptography test
@@ -202,74 +203,59 @@ namespace Nostr.Unity.Examples
             }
         }
         
-        private async void ConnectToRelays()
+        private IEnumerator ConnectToRelays()
         {
-            try
+            UpdateStatus("Connecting to relays...");
+            foreach (var relayUrl in relayUrls)
             {
-                UpdateStatus("Connecting to relays...");
-                
-                // Connect to all configured relays
-                await _client.ConnectToRelays(new List<string>(relayUrls));
-                
-                // Subscribe to text notes
-                Filter filter = new Filter();
-                filter.Kinds = new int[] { (int)NostrEventKind.TextNote };
-                filter.Limit = 10;
-                
-                // Subscribe to events from the last hour
-                long oneHourAgo = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 3600;
-                filter.Since = oneHourAgo;
-                
-                string subscriptionId = _client.Subscribe(filter);
-                Debug.Log($"Subscribed with ID: {subscriptionId}");
+                bool connected = false;
+                yield return StartCoroutine(_client.ConnectToRelay(relayUrl, result => connected = result));
+                if (connected)
+                {
+                    Debug.Log($"Connected to relay: {relayUrl}");
+                }
+                else
+                {
+                    Debug.LogWarning($"Failed to connect to relay: {relayUrl}");
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error connecting to relays: {ex.Message}");
-                UpdateStatus($"Connection error: {ex.Message}");
-            }
+            // Subscribe to text notes
+            Filter filter = new Filter();
+            filter.Kinds = new int[] { (int)NostrEventKind.TextNote };
+            filter.Limit = 10;
+            long oneHourAgo = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 3600;
+            filter.Since = oneHourAgo;
+            string subscriptionId = _client.Subscribe(filter, null); // Provide a callback if needed
+            Debug.Log($"Subscribed with ID: {subscriptionId}");
         }
         
-        private async void SendMessage()
+        private IEnumerator SendMessage()
         {
             if (string.IsNullOrEmpty(messageInput.text))
-                return;
-                
-            try
+                yield break;
+            string message = messageInput.text;
+            UpdateStatus("Sending message...");
+            // Create a new text note event
+            NostrEvent nostrEvent = new NostrEvent(_publicKey, (int)NostrEventKind.TextNote, message);
+            // Sign the event
+            nostrEvent.Sign(_privateKey);
+            // Verify the signature locally before sending
+            if (!nostrEvent.VerifySignature())
             {
-                string message = messageInput.text;
-                UpdateStatus("Sending message...");
-                
-                // Create a new text note event
-                NostrEvent nostrEvent = new NostrEvent();
-                nostrEvent.Kind = (int)NostrEventKind.TextNote;
-                nostrEvent.CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                nostrEvent.Content = message;
-                nostrEvent.PublicKey = _publicKey;
-                
-                // Sign the event
-                nostrEvent.Sign(_privateKey);
-                
-                // Verify the signature locally before sending
-                if (!nostrEvent.VerifySignature())
-                {
-                    Debug.LogError("Event signature verification failed locally");
-                    UpdateStatus("Signing error: Invalid signature");
-                    return;
-                }
-                
-                // Publish the event
-                await _client.PublishEvent(nostrEvent);
-                
-                // Clear the input field
+                Debug.LogError("Event signature verification failed locally");
+                UpdateStatus("Signing error: Invalid signature");
+                yield break;
+            }
+            bool published = false;
+            yield return StartCoroutine(_client.PublishEvent(nostrEvent, result => published = result));
+            if (published)
+            {
                 messageInput.text = "";
-                
                 UpdateStatus("Message sent");
             }
-            catch (Exception ex)
+            else
             {
-                Debug.LogError($"Error sending message: {ex.Message}");
-                UpdateStatus($"Send error: {ex.Message}");
+                UpdateStatus("Failed to send message");
             }
         }
         
