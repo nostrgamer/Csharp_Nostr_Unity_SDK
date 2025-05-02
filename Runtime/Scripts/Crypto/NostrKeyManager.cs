@@ -33,7 +33,14 @@ namespace Nostr.Unity
                     rng.GetBytes(privateKey);
                 }
                 
-                return useHex ? BytesToHex(privateKey) : Convert.ToBase64String(privateKey);
+                if (useHex)
+                {
+                    return Bech32.BytesToHex(privateKey);
+                }
+                else
+                {
+                    return Bech32.Encode(NostrConstants.NSEC_PREFIX, privateKey);
+                }
             }
             catch (Exception ex)
             {
@@ -77,7 +84,7 @@ namespace Nostr.Unity
                 }
                 
                 // Use Secp256k1Manager to derive the public key
-                byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
+                byte[] privateKeyBytes = Bech32.HexToBytes(hexPrivateKey);
                 byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
                 
                 // Secp256k1.Net returns 33-byte compressed public keys
@@ -97,7 +104,7 @@ namespace Nostr.Unity
                     Debug.LogWarning($"Unexpected public key format: {publicKeyBytes.Length} bytes");
                 }
                 
-                string hexPublicKey = BytesToHex(nostrPublicKeyBytes);
+                string hexPublicKey = Bech32.BytesToHex(nostrPublicKeyBytes);
                 
                 if (useHex)
                 {
@@ -105,7 +112,7 @@ namespace Nostr.Unity
                 }
                 else
                 {
-                    return hexPublicKey.ToNpub();
+                    return Bech32.Encode(NostrConstants.NPUB_PREFIX, nostrPublicKeyBytes);
                 }
             }
             catch (Exception ex)
@@ -159,13 +166,13 @@ namespace Nostr.Unity
                 byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
                 
                 // Convert the private key to bytes
-                byte[] privateKeyBytes = HexToBytes(hexPrivateKey);
+                byte[] privateKeyBytes = Bech32.HexToBytes(hexPrivateKey);
                 
                 // Generate the signature
                 byte[] signatureBytes = Secp256k1Manager.Sign(messageHash, privateKeyBytes);
                 
                 // Convert to hex
-                return BytesToHex(signatureBytes);
+                return Bech32.BytesToHex(signatureBytes);
             }
             catch (Exception ex)
             {
@@ -219,10 +226,10 @@ namespace Nostr.Unity
                 byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
                 
                 // Convert the signature to bytes
-                byte[] signatureBytes = HexToBytes(signature);
+                byte[] signatureBytes = Bech32.HexToBytes(signature);
                 
                 // Convert the public key to bytes
-                byte[] publicKeyBytes = HexToBytes(hexPublicKey);
+                byte[] publicKeyBytes = Bech32.HexToBytes(hexPublicKey);
                 
                 // Verify the signature
                 return Secp256k1Manager.Verify(messageHash, signatureBytes, publicKeyBytes);
@@ -441,49 +448,6 @@ namespace Nostr.Unity
                     return sr.ReadToEnd();
                 }
             }
-        }
-        
-        private byte[] HexToBytes(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-            {
-                return new byte[0];
-            }
-            
-            // Remove 0x prefix if present
-            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            {
-                hex = hex.Substring(2);
-            }
-            
-            // Ensure even length
-            if (hex.Length % 2 != 0)
-            {
-                hex = "0" + hex;
-            }
-            
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < bytes.Length; i++)
-            {
-                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
-            }
-            
-            return bytes;
-        }
-        
-        private string BytesToHex(byte[] bytes)
-        {
-            if (bytes == null || bytes.Length == 0)
-            {
-                return string.Empty;
-            }
-            
-            StringBuilder hex = new StringBuilder(bytes.Length * 2);
-            foreach (byte b in bytes)
-            {
-                hex.AppendFormat("{0:x2}", b);
-            }
-            return hex.ToString();
         }
     }
 } 

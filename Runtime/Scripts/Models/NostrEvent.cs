@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UnityEngine;
+using Nostr.Unity.Utils;
 
 namespace Nostr.Unity
 {
@@ -92,9 +93,7 @@ namespace Nostr.Unity
             // Sign the event
             using (var keyManager = new NostrKeyManager())
             {
-                byte[] messageHash = SHA256.HashData(Encoding.UTF8.GetBytes(GetSerializedEvent()));
-                byte[] signature = keyManager.Sign(messageHash, privateKey);
-                Signature = BytesToHex(signature);
+                Signature = keyManager.SignMessage(GetSerializedEvent(), privateKey);
             }
         }
         
@@ -111,7 +110,6 @@ namespace Nostr.Unity
             {
                 using (var keyManager = new NostrKeyManager())
                 {
-                    byte[] messageHash = SHA256.HashData(Encoding.UTF8.GetBytes(GetSerializedEvent()));
                     return keyManager.VerifySignature(GetSerializedEvent(), Signature, PublicKey);
                 }
             }
@@ -133,7 +131,7 @@ namespace Nostr.Unity
             
             string serializedEvent = GetSerializedEvent();
             byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(serializedEvent));
-            return BytesToHex(hash);
+            return Bech32.BytesToHex(hash);
         }
         
         /// <summary>
@@ -148,19 +146,6 @@ namespace Nostr.Unity
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 WriteIndented = false
             });
-        }
-        
-        /// <summary>
-        /// Converts a byte array to a hex string
-        /// </summary>
-        private static string BytesToHex(byte[] bytes)
-        {
-            StringBuilder hex = new StringBuilder(bytes.Length * 2);
-            foreach (byte b in bytes)
-            {
-                hex.AppendFormat("{0:x2}", b);
-            }
-            return hex.ToString();
         }
     }
 } 
