@@ -9,6 +9,7 @@ A Unity SDK for integrating the [Nostr protocol](https://github.com/nostr-protoc
 - **Message Posting**: Publish events to the Nostr network
 - **Event Subscriptions**: Subscribe to specific event types or users
 - **Cross-Platform Support**: Works on all platforms Unity supports
+- **Secure Cryptography**: Uses BouncyCastle for all cryptographic operations
 
 ## Installation
 
@@ -24,6 +25,13 @@ A Unity SDK for integrating the [Nostr protocol](https://github.com/nostr-protoc
 
 1. Download this repository
 2. Copy the contents into your Unity project's `Assets` folder
+
+### Required Dependency
+
+This SDK requires the BouncyCastle cryptography library:
+
+1. Download [BouncyCastle.Crypto.dll](https://www.bouncycastle.org/csharp/) from the official website
+2. Place it in your project's `Assets/Plugins` folder (create the folder if it doesn't exist)
 
 ## Getting Started
 
@@ -120,4 +128,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgements
 
 - [Nostr Protocol](https://github.com/nostr-protocol/nips)
-- [NativeWebSocket](https://github.com/endel/NativeWebSocket) for WebSocket communication 
+- [NativeWebSocket](https://github.com/endel/NativeWebSocket) for WebSocket communication
+- [BouncyCastle](https://www.bouncycastle.org/) for cryptographic operations 
