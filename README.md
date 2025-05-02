@@ -113,10 +113,6 @@ List<string> relayUrls = new List<string>
 await client.ConnectToRelays(relayUrls);
 ```
 
-## Documentation
-
-For detailed documentation, please refer to the [Wiki](https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/wiki).
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
