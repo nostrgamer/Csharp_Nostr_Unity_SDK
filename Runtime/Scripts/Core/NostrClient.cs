@@ -11,6 +11,7 @@ namespace Nostr.Unity
     public class NostrClient
     {
         private WebSocketClient _webSocketClient;
+        private Dictionary<string, Filter> _subscriptions = new Dictionary<string, Filter>();
         
         /// <summary>
         /// Event triggered when a new event is received from a relay
@@ -86,15 +87,82 @@ namespace Nostr.Unity
             await _webSocketClient.SendToAll(json);
         }
         
+        /// <summary>
+        /// Subscribes to events based on the provided filter
+        /// </summary>
+        /// <param name="filter">The filter criteria for the subscription</param>
+        /// <returns>The subscription ID</returns>
+        public string Subscribe(Filter filter)
+        {
+            if (filter == null)
+                throw new ArgumentNullException(nameof(filter));
+            
+            // Generate a subscription ID
+            string subscriptionId = Guid.NewGuid().ToString().Substring(0, 8);
+            
+            // Store the subscription
+            _subscriptions[subscriptionId] = filter;
+            
+            // Create a subscription message
+            string subscriptionJson = $"[\"REQ\",\"{subscriptionId}\",{filter.ToJson()}]";
+            
+            // Send the subscription to all connected relays
+            _webSocketClient.SendToAll(subscriptionJson).ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                    Debug.LogError($"Error subscribing: {task.Exception?.Message}");
+            });
+            
+            return subscriptionId;
+        }
+        
+        /// <summary>
+        /// Unsubscribes from events for the given subscription ID
+        /// </summary>
+        /// <param name="subscriptionId">The subscription ID to unsubscribe</param>
+        public void Unsubscribe(string subscriptionId)
+        {
+            if (string.IsNullOrEmpty(subscriptionId))
+                throw new ArgumentNullException(nameof(subscriptionId));
+            
+            // Remove the subscription
+            if (_subscriptions.ContainsKey(subscriptionId))
+                _subscriptions.Remove(subscriptionId);
+            
+            // Create a close message
+            string closeJson = $"[\"CLOSE\",\"{subscriptionId}\"]";
+            
+            // Send the close message to all connected relays
+            _webSocketClient.SendToAll(closeJson).ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                    Debug.LogError($"Error unsubscribing: {task.Exception?.Message}");
+            });
+        }
+        
         private void OnMessageReceived(object sender, string message)
         {
             // TODO: Parse the message
             Debug.Log($"Received message: {message}");
+            
+            // In a real implementation, you would parse the message and trigger the EventReceived event
+            // For now, we'll just log it
         }
         
         private void OnConnected(object sender, string relayUrl)
         {
             Connected?.Invoke(this, relayUrl);
+            
+            // Re-subscribe to all subscriptions
+            foreach (var subscription in _subscriptions)
+            {
+                string subscriptionJson = $"[\"REQ\",\"{subscription.Key}\",{subscription.Value.ToJson()}]";
+                _webSocketClient.SendToRelay(relayUrl, subscriptionJson).ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                        Debug.LogError($"Error re-subscribing: {task.Exception?.Message}");
+                });
+            }
         }
         
         private void OnDisconnected(object sender, string relayUrl)

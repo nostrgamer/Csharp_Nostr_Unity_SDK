@@ -128,7 +128,7 @@ public class NostrClientExample : MonoBehaviour
             // Create and send a note
             NostrEvent noteEvent = new NostrEvent
             {
-                Kind = NostrEventKind.TextNote,
+                Kind = (int)NostrEventKind.TextNote,
                 Content = messageToSend,
                 CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
             };
@@ -161,7 +161,7 @@ public class NostrClientExample : MonoBehaviour
             // Subscribe to text notes
             Filter filter = new Filter
             {
-                Kinds = new[] { NostrEventKind.TextNote },
+                Kinds = new[] { (int)NostrEventKind.TextNote },
                 Limit = 10
             };
             

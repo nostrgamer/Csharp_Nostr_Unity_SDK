@@ -24,7 +24,7 @@ namespace Nostr.Unity
                     return true;
                 
                 _isInitialized = true;
-                Debug.Log("Secp256k1 BouncyCastle implementation initialized");
+                Debug.Log("Secp256k1 pure C# implementation initialized");
                 return true;
             }
             catch (Exception ex)

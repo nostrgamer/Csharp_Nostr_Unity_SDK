@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Nostr.Unity.Crypto
 {
     /// <summary>
-    /// Pure C# implementation of cryptographic functions for Nostr
+    /// Pure C# implementation of cryptographic functions for Nostr using built-in .NET cryptography
     /// </summary>
     public static class Secp256k1BouncyCastleManager
     {
@@ -35,8 +35,8 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Simulates deriving the public key from a private key
-        /// Note: This is a placeholder for actual EC crypto which requires BouncyCastle
+        /// Creates a deterministic public key from the private key
+        /// Note: This is a simplified implementation without actual EC operations
         /// </summary>
         /// <param name="privateKey">The 32-byte private key</param>
         /// <returns>A simulated 33-byte compressed public key</returns>
@@ -49,8 +49,7 @@ namespace Nostr.Unity.Crypto
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
                 
-                // In a real implementation, we would use EC math to derive the public key
-                // Instead, we'll create a deterministic public key based on the private key
+                // Create a deterministic public key based on the private key
                 using (var sha256 = SHA256.Create())
                 {
                     byte[] hashed = sha256.ComputeHash(privateKey);
@@ -100,8 +99,8 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Simulates signing a message hash with a private key
-        /// Note: This is a placeholder for actual EC crypto which requires BouncyCastle
+        /// Creates a deterministic signature based on the message hash and private key
+        /// Note: This is a simplified implementation without actual EC signing
         /// </summary>
         /// <param name="messageHash">The 32-byte hash of the message</param>
         /// <param name="privateKey">The 32-byte private key</param>
@@ -120,14 +119,13 @@ namespace Nostr.Unity.Crypto
                     throw new ArgumentException("Private key must be 32 bytes");
                 }
                 
-                // In a real implementation, we would use EC crypto for signing
-                // Here we'll create a deterministic "signature" based on the inputs
+                // Use HMAC-SHA256 to create a deterministic signature
                 using (var hmac = new HMACSHA256(privateKey))
                 {
-                    // Sign the message hash using HMAC-SHA256 with the private key
+                    // First half is HMAC-SHA256 of the message hash
                     byte[] firstHalf = hmac.ComputeHash(messageHash);
                     
-                    // Generate a second half by hashing the first half
+                    // Second half is SHA256 of the first half
                     using (var sha256 = SHA256.Create())
                     {
                         byte[] secondHalf = sha256.ComputeHash(firstHalf);
@@ -149,13 +147,13 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Simulates verifying a signature
-        /// Note: This is a placeholder for actual EC crypto which requires BouncyCastle
+        /// Simulates signature verification
+        /// Note: This is a simplified implementation without actual EC verification
         /// </summary>
         /// <param name="messageHash">The 32-byte hash of the message</param>
         /// <param name="signature">The 64-byte signature</param>
         /// <param name="publicKey">The public key (33 bytes compressed)</param>
-        /// <returns>Always returns true in this implementation</returns>
+        /// <returns>Always returns true for demonstration</returns>
         public static bool Verify(byte[] messageHash, byte[] signature, byte[] publicKey)
         {
             try
@@ -175,8 +173,8 @@ namespace Nostr.Unity.Crypto
                     throw new ArgumentException("Public key must be 33 bytes (compressed format)");
                 }
                 
-                // In a real implementation, we would verify the signature using EC math
-                // Here we'll just return true for demo purposes
+                // For demonstration purposes, this always returns true
+                // In a real implementation, we would verify the signature with EC math
                 Debug.LogWarning("Using simplified signature verification (always returns true)");
                 return true;
             }
