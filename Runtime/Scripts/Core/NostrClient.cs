@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Nostr.Unity
@@ -12,9 +15,17 @@ namespace Nostr.Unity
     /// </summary>
     public class NostrClient
     {
-        private WebSocketClient _webSocketClient;
-        private Dictionary<string, Filter> _subscriptions = new Dictionary<string, Filter>();
-        private Dictionary<string, string> _relayConnections = new Dictionary<string, string>();
+        private readonly List<ClientWebSocket> _webSockets = new List<ClientWebSocket>();
+        private readonly List<string> _relayUrls = new List<string>();
+        private readonly Dictionary<string, List<Action<NostrEvent>>> _subscriptions = new Dictionary<string, List<Action<NostrEvent>>>();
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+        private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        
+        private const int RECONNECT_DELAY_MS = 5000;
+        private const int MAX_RECONNECT_ATTEMPTS = 3;
         
         /// <summary>
         /// Event triggered when a new event is received from a relay
@@ -39,349 +50,287 @@ namespace Nostr.Unity
         /// <summary>
         /// Gets a value indicating whether the client is connected to any relay
         /// </summary>
-        public bool IsConnected => _webSocketClient != null && _webSocketClient.IsAnyConnectionOpen;
+        public bool IsConnected => _webSockets.Count > 0;
         
         /// <summary>
         /// Gets the list of connected relay URLs
         /// </summary>
-        public List<string> ConnectedRelays
-        {
-            get
-            {
-                List<string> relays = new List<string>();
-                foreach (var kvp in _relayConnections)
-                {
-                    if (!string.IsNullOrEmpty(kvp.Value))
-                    {
-                        relays.Add(kvp.Value);
-                    }
-                }
-                return relays;
-            }
-        }
+        public List<string> ConnectedRelays => _relayUrls;
         
         /// <summary>
         /// Initializes a new instance of the NostrClient class
         /// </summary>
         public NostrClient()
         {
-            _webSocketClient = new WebSocketClient();
-            _webSocketClient.MessageReceived += OnMessageReceived;
-            _webSocketClient.Connected += OnConnected;
-            _webSocketClient.Disconnected += OnDisconnected;
-            _webSocketClient.Error += OnError;
+            // Initialize any other necessary components
         }
         
         /// <summary>
         /// Connects to a Nostr relay
         /// </summary>
-        /// <param name="relayUrl">The URL of the relay to connect to</param>
-        /// <returns>A task representing the asynchronous operation</returns>
-        public async Task ConnectToRelay(string relayUrl)
+        /// <param name="relayUrl">The WebSocket URL of the relay</param>
+        /// <returns>True if the connection was successful</returns>
+        public async Task<bool> ConnectToRelay(string relayUrl)
         {
             try
             {
                 if (string.IsNullOrEmpty(relayUrl))
-                {
                     throw new ArgumentException("Relay URL cannot be null or empty", nameof(relayUrl));
-                }
                 
-                await _webSocketClient.Connect(relayUrl);
-                _relayConnections[relayUrl] = relayUrl;
+                if (!relayUrl.StartsWith("wss://") && !relayUrl.StartsWith("ws://"))
+                    throw new ArgumentException("Relay URL must start with wss:// or ws://", nameof(relayUrl));
+                
+                var webSocket = new ClientWebSocket();
+                await webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                
+                _webSockets.Add(webSocket);
+                _relayUrls.Add(relayUrl);
+                
+                // Start receiving messages in the background
+                _ = ReceiveMessagesAsync(webSocket, relayUrl);
+                
+                Debug.Log($"Connected to relay: {relayUrl}");
+                return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error connecting to relay {relayUrl}: {ex.Message}");
-                OnError(this, $"Connection error: {ex.Message}");
-                throw;
-            }
-        }
-        
-        /// <summary>
-        /// Connects to multiple Nostr relays
-        /// </summary>
-        /// <param name="relayUrls">List of relay URLs to connect to</param>
-        /// <returns>A task representing the asynchronous operation</returns>
-        public async Task ConnectToRelays(List<string> relayUrls)
-        {
-            if (relayUrls == null || relayUrls.Count == 0)
-            {
-                throw new ArgumentException("Relay URL list cannot be null or empty", nameof(relayUrls));
-            }
-            
-            List<Exception> exceptions = new List<Exception>();
-            
-            foreach (var relayUrl in relayUrls)
-            {
-                try
-                {
-                    await ConnectToRelay(relayUrl);
-                }
-                catch (Exception ex)
-                {
-                    exceptions.Add(ex);
-                    Debug.LogWarning($"Failed to connect to relay {relayUrl}: {ex.Message}");
-                }
-            }
-            
-            if (exceptions.Count > 0 && exceptions.Count == relayUrls.Count)
-            {
-                throw new AggregateException("Failed to connect to any relay", exceptions);
+                Debug.LogError($"Failed to connect to relay {relayUrl}: {ex.Message}");
+                return false;
             }
         }
         
         /// <summary>
         /// Disconnects from all relays
         /// </summary>
-        public void Disconnect()
+        public async Task Disconnect()
         {
-            try
+            _cancellationTokenSource.Cancel();
+            
+            foreach (var webSocket in _webSockets)
             {
-                _webSocketClient.DisconnectAll();
-                _relayConnections.Clear();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error during disconnect: {ex.Message}");
-                OnError(this, $"Disconnect error: {ex.Message}");
-            }
-        }
-        
-        /// <summary>
-        /// Disconnects from a specific relay
-        /// </summary>
-        /// <param name="relayUrl">The URL of the relay to disconnect from</param>
-        public void DisconnectFromRelay(string relayUrl)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(relayUrl))
+                try
                 {
-                    throw new ArgumentException("Relay URL cannot be null or empty", nameof(relayUrl));
+                    if (webSocket.State == WebSocketState.Open)
+                    {
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+                    }
                 }
-                
-                _webSocketClient.Disconnect(relayUrl);
-                _relayConnections.Remove(relayUrl);
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error closing WebSocket: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error disconnecting from relay {relayUrl}: {ex.Message}");
-                OnError(this, $"Disconnect error: {ex.Message}");
-            }
+            
+            _webSockets.Clear();
+            _relayUrls.Clear();
+            _subscriptions.Clear();
         }
         
         /// <summary>
-        /// Publishes an event to connected relays
+        /// Publishes an event to all connected relays
         /// </summary>
         /// <param name="nostrEvent">The event to publish</param>
-        /// <returns>A task representing the asynchronous operation</returns>
-        public async Task PublishEvent(NostrEvent nostrEvent)
+        /// <returns>True if the event was published successfully to at least one relay</returns>
+        public async Task<bool> PublishEvent(NostrEvent nostrEvent)
         {
-            try
+            if (nostrEvent == null)
+                throw new ArgumentNullException(nameof(nostrEvent));
+            
+            if (string.IsNullOrEmpty(nostrEvent.Id))
+                throw new ArgumentException("Event ID cannot be null or empty", nameof(nostrEvent));
+            
+            if (string.IsNullOrEmpty(nostrEvent.Signature))
+                throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
+            
+            if (!nostrEvent.VerifySignature())
+                throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
+            
+            bool success = false;
+            var eventMessage = new object[] { "EVENT", nostrEvent };
+            string jsonMessage = JsonSerializer.Serialize(eventMessage, _jsonOptions);
+            
+            foreach (var webSocket in _webSockets)
             {
-                if (nostrEvent == null)
+                try
                 {
-                    throw new ArgumentNullException(nameof(nostrEvent), "Event cannot be null");
-                }
-                
-                // Validate the event
-                if (string.IsNullOrEmpty(nostrEvent.Id))
-                {
-                    nostrEvent.Id = nostrEvent.ComputeId();
-                }
-                
-                if (string.IsNullOrEmpty(nostrEvent.Signature))
-                {
-                    throw new InvalidOperationException("Event must be signed before publishing");
-                }
-                
-                // Verify the signature before sending
-                if (!nostrEvent.VerifySignature())
-                {
-                    throw new InvalidOperationException("Event has an invalid signature");
-                }
-                
-                // Create the EVENT message: ["EVENT", <event JSON>]
-                string eventJson = JsonSerializer.Serialize(nostrEvent, new JsonSerializerOptions 
-                { 
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    WriteIndented = false
-                });
-                
-                string message = $"[\"EVENT\",{eventJson}]";
-                
-                // Send to all connected relays
-                await _webSocketClient.SendToAll(message);
-                
-                Debug.Log($"Published event {nostrEvent.Id} to {ConnectedRelays.Count} relays");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error publishing event: {ex.Message}");
-                OnError(this, $"Publish error: {ex.Message}");
-                throw;
-            }
-        }
-        
-        /// <summary>
-        /// Subscribes to events based on the provided filter
-        /// </summary>
-        /// <param name="filter">The filter criteria for the subscription</param>
-        /// <returns>The subscription ID</returns>
-        public string Subscribe(Filter filter)
-        {
-            try
-            {
-                if (filter == null)
-                {
-                    throw new ArgumentNullException(nameof(filter), "Filter cannot be null");
-                }
-                
-                // Generate a subscription ID
-                string subscriptionId = Guid.NewGuid().ToString().Substring(0, 8);
-                
-                // Store the subscription
-                _subscriptions[subscriptionId] = filter;
-                
-                // Create a subscription message: ["REQ", <subscription_id>, <filter JSON>]
-                string subscriptionJson = $"[\"REQ\",\"{subscriptionId}\",{filter.ToJson()}]";
-                
-                // Send the subscription to all connected relays
-                _webSocketClient.SendToAll(subscriptionJson).ContinueWith(task =>
-                {
-                    if (task.IsFaulted)
+                    if (webSocket.State == WebSocketState.Open)
                     {
-                        Debug.LogError($"Error subscribing: {task.Exception?.Message}");
-                        OnError(this, $"Subscribe error: {task.Exception?.Message}");
+                        byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                        await webSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+                        success = true;
                     }
-                });
-                
-                return subscriptionId;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Failed to publish event to relay: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error creating subscription: {ex.Message}");
-                OnError(this, $"Subscribe error: {ex.Message}");
-                throw;
-            }
+            
+            return success;
         }
         
         /// <summary>
-        /// Unsubscribes from events for the given subscription ID
+        /// Subscribes to events matching a filter
         /// </summary>
-        /// <param name="subscriptionId">The subscription ID to unsubscribe</param>
+        /// <param name="filter">The filter to match events against</param>
+        /// <param name="onEventReceived">Callback for when an event is received</param>
+        /// <returns>The subscription ID</returns>
+        public string Subscribe(Filter filter, Action<NostrEvent> onEventReceived)
+        {
+            if (filter == null)
+                throw new ArgumentNullException(nameof(filter));
+            
+            if (onEventReceived == null)
+                throw new ArgumentNullException(nameof(onEventReceived));
+            
+            string subscriptionId = Guid.NewGuid().ToString();
+            _subscriptions[subscriptionId] = new List<Action<NostrEvent>> { onEventReceived };
+            
+            // Send subscription to all connected relays
+            var subscriptionMessage = new object[] { "REQ", subscriptionId, filter };
+            string jsonMessage = JsonSerializer.Serialize(subscriptionMessage, _jsonOptions);
+            SendToAll(jsonMessage);
+            
+            return subscriptionId;
+        }
+        
+        /// <summary>
+        /// Unsubscribes from events
+        /// </summary>
+        /// <param name="subscriptionId">The subscription ID to unsubscribe from</param>
         public void Unsubscribe(string subscriptionId)
         {
-            try
+            if (string.IsNullOrEmpty(subscriptionId))
+                throw new ArgumentException("Subscription ID cannot be null or empty", nameof(subscriptionId));
+            
+            if (_subscriptions.Remove(subscriptionId))
             {
-                if (string.IsNullOrEmpty(subscriptionId))
-                {
-                    throw new ArgumentNullException(nameof(subscriptionId), "Subscription ID cannot be null or empty");
-                }
-                
-                // Remove the subscription
-                if (_subscriptions.ContainsKey(subscriptionId))
-                {
-                    _subscriptions.Remove(subscriptionId);
-                }
-                
-                // Create a close message: ["CLOSE", <subscription_id>]
-                string closeJson = $"[\"CLOSE\",\"{subscriptionId}\"]";
-                
-                // Send the close message to all connected relays
-                _webSocketClient.SendToAll(closeJson).ContinueWith(task =>
-                {
-                    if (task.IsFaulted)
-                    {
-                        Debug.LogError($"Error unsubscribing: {task.Exception?.Message}");
-                        OnError(this, $"Unsubscribe error: {task.Exception?.Message}");
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error unsubscribing: {ex.Message}");
-                OnError(this, $"Unsubscribe error: {ex.Message}");
+                // Send close message to all connected relays
+                var closeMessage = new object[] { "CLOSE", subscriptionId };
+                string jsonMessage = JsonSerializer.Serialize(closeMessage, _jsonOptions);
+                SendToAll(jsonMessage);
             }
         }
         
-        private void OnMessageReceived(object sender, MessageReceivedEventArgs e)
+        private async Task ReceiveMessagesAsync(ClientWebSocket webSocket, string relayUrl)
+        {
+            var buffer = new byte[4096];
+            int reconnectAttempts = 0;
+            
+            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    if (webSocket.State != WebSocketState.Open)
+                    {
+                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS)
+                        {
+                            Debug.Log($"Attempting to reconnect to {relayUrl} (attempt {reconnectAttempts + 1}/{MAX_RECONNECT_ATTEMPTS})");
+                            await Task.Delay(RECONNECT_DELAY_MS, _cancellationTokenSource.Token);
+                            
+                            try
+                            {
+                                await webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                                reconnectAttempts = 0;
+                                Debug.Log($"Reconnected to relay: {relayUrl}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.LogError($"Reconnection attempt failed: {ex.Message}");
+                                reconnectAttempts++;
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogError($"Max reconnection attempts reached for {relayUrl}");
+                            break;
+                        }
+                    }
+                    
+                    var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
+                    
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        Debug.Log($"Received close message from {relayUrl}");
+                        break;
+                    }
+                    
+                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    HandleMessage(message, relayUrl);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error receiving message from {relayUrl}: {ex.Message}");
+                    await Task.Delay(RECONNECT_DELAY_MS, _cancellationTokenSource.Token);
+                }
+            }
+        }
+        
+        private void HandleMessage(string message, string relayUrl)
         {
             try
             {
-                string message = e.Message;
-                string relayUrl = e.RelayUrl;
-                
-                // Parse the message based on NIP-01
-                if (string.IsNullOrEmpty(message) || message.Length < 2 || message[0] != '[')
-                {
-                    Debug.LogWarning($"Received invalid message from {relayUrl}: {message}");
-                    return;
-                }
-                
-                // Try to parse as JSON array
-                var messageArray = JsonSerializer.Deserialize<object[]>(message);
+                var messageArray = JsonSerializer.Deserialize<object[]>(message, _jsonOptions);
                 
                 if (messageArray == null || messageArray.Length < 2)
                 {
-                    Debug.LogWarning($"Received invalid message format from {relayUrl}: {message}");
+                    Debug.LogWarning($"Invalid message format from {relayUrl}: {message}");
                     return;
                 }
                 
-                // Get the message type
-                string messageType = messageArray[0].ToString();
+                string messageType = messageArray[0]?.ToString();
                 
-                // Handle different message types
                 switch (messageType)
                 {
                     case "EVENT":
                         HandleEventMessage(messageArray, relayUrl);
                         break;
-                        
+                    case "EOSE":
+                        HandleEoseMessage(messageArray, relayUrl);
+                        break;
                     case "NOTICE":
                         HandleNoticeMessage(messageArray, relayUrl);
                         break;
-                        
-                    case "EOSE":
-                        HandleEndOfStoredEventsMessage(messageArray, relayUrl);
-                        break;
-                        
-                    case "OK":
-                        HandleOkMessage(messageArray, relayUrl);
-                        break;
-                        
                     default:
-                        Debug.LogWarning($"Received unknown message type from {relayUrl}: {messageType}");
+                        Debug.LogWarning($"Unknown message type from {relayUrl}: {messageType}");
                         break;
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error processing message: {ex.Message}");
+                Debug.LogError($"Error handling message from {relayUrl}: {ex.Message}");
             }
         }
         
         private void HandleEventMessage(object[] messageArray, string relayUrl)
         {
-            if (messageArray.Length < 3)
-            {
-                Debug.LogWarning($"Received invalid EVENT message from {relayUrl}");
-                return;
-            }
-            
             try
             {
-                // The second element is the subscription ID
-                string subscriptionId = messageArray[1].ToString();
+                if (messageArray.Length < 3)
+                {
+                    Debug.LogWarning($"Invalid EVENT message format from {relayUrl}");
+                    return;
+                }
                 
-                // The third element is the event JSON
+                string subscriptionId = messageArray[1]?.ToString();
+                if (string.IsNullOrEmpty(subscriptionId))
+                {
+                    Debug.LogWarning($"Invalid subscription ID in EVENT message from {relayUrl}");
+                    return;
+                }
+                
+                if (!_subscriptions.TryGetValue(subscriptionId, out var callbacks))
+                {
+                    Debug.LogWarning($"Received event for unknown subscription {subscriptionId} from {relayUrl}");
+                    return;
+                }
+                
                 var eventJson = messageArray[2].ToString();
-                
-                // Deserialize the event
-                var nostrEvent = JsonSerializer.Deserialize<NostrEvent>(eventJson, new JsonSerializerOptions 
-                { 
-                    PropertyNameCaseInsensitive = true
-                });
+                var nostrEvent = JsonSerializer.Deserialize<NostrEvent>(eventJson, _jsonOptions);
                 
                 if (nostrEvent == null)
                 {
@@ -389,143 +338,98 @@ namespace Nostr.Unity
                     return;
                 }
                 
-                // Check if this is a valid event
-                if (string.IsNullOrEmpty(nostrEvent.Id) || string.IsNullOrEmpty(nostrEvent.Signature))
-                {
-                    Debug.LogWarning($"Received event with missing ID or signature from {relayUrl}");
-                    return;
-                }
-                
-                // Verify the signature
                 if (!nostrEvent.VerifySignature())
                 {
-                    Debug.LogWarning($"Received event with invalid signature from {relayUrl}");
+                    Debug.LogWarning($"Invalid event signature from {relayUrl}");
                     return;
                 }
                 
-                // Raise the event received event
-                EventReceived?.Invoke(this, new NostrEventArgs(nostrEvent, subscriptionId, relayUrl));
+                foreach (var callback in callbacks)
+                {
+                    try
+                    {
+                        callback(nostrEvent);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error in event callback: {ex.Message}");
+                    }
+                }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error handling EVENT message: {ex.Message}");
+                Debug.LogError($"Error handling EVENT message from {relayUrl}: {ex.Message}");
+            }
+        }
+        
+        private void HandleEoseMessage(object[] messageArray, string relayUrl)
+        {
+            try
+            {
+                if (messageArray.Length < 2)
+                {
+                    Debug.LogWarning($"Invalid EOSE message format from {relayUrl}");
+                    return;
+                }
+                
+                string subscriptionId = messageArray[1]?.ToString();
+                if (string.IsNullOrEmpty(subscriptionId))
+                {
+                    Debug.LogWarning($"Invalid subscription ID in EOSE message from {relayUrl}");
+                    return;
+                }
+                
+                Debug.Log($"End of stored events for subscription {subscriptionId} from {relayUrl}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error handling EOSE message from {relayUrl}: {ex.Message}");
             }
         }
         
         private void HandleNoticeMessage(object[] messageArray, string relayUrl)
         {
-            if (messageArray.Length < 2)
-            {
-                Debug.LogWarning($"Received invalid NOTICE message from {relayUrl}");
-                return;
-            }
-            
             try
             {
-                // The second element is the notice message
-                string notice = messageArray[1].ToString();
-                
-                Debug.Log($"Received NOTICE from {relayUrl}: {notice}");
-                
-                // Raise the error event for notices (they're often warnings/errors)
-                OnError(this, $"Relay notice: {notice}");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error handling NOTICE message: {ex.Message}");
-            }
-        }
-        
-        private void HandleEndOfStoredEventsMessage(object[] messageArray, string relayUrl)
-        {
-            if (messageArray.Length < 2)
-            {
-                Debug.LogWarning($"Received invalid EOSE message from {relayUrl}");
-                return;
-            }
-            
-            try
-            {
-                // The second element is the subscription ID
-                string subscriptionId = messageArray[1].ToString();
-                
-                Debug.Log($"Received EOSE for subscription {subscriptionId} from {relayUrl}");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error handling EOSE message: {ex.Message}");
-            }
-        }
-        
-        private void HandleOkMessage(object[] messageArray, string relayUrl)
-        {
-            if (messageArray.Length < 3)
-            {
-                Debug.LogWarning($"Received invalid OK message from {relayUrl}");
-                return;
-            }
-            
-            try
-            {
-                // The second element is the event ID
-                string eventId = messageArray[1].ToString();
-                
-                // The third element is a boolean success flag
-                bool success = bool.Parse(messageArray[2].ToString());
-                
-                // The fourth element (if present) is an error message
-                string errorMessage = messageArray.Length > 3 ? messageArray[3].ToString() : null;
-                
-                if (success)
+                if (messageArray.Length < 2)
                 {
-                    Debug.Log($"Event {eventId} successfully published to {relayUrl}");
+                    Debug.LogWarning($"Invalid NOTICE message format from {relayUrl}");
+                    return;
                 }
-                else
+                
+                string notice = messageArray[1]?.ToString();
+                if (string.IsNullOrEmpty(notice))
                 {
-                    Debug.LogWarning($"Failed to publish event {eventId} to {relayUrl}: {errorMessage}");
-                    OnError(this, $"Publish error: {errorMessage}");
+                    Debug.LogWarning($"Empty notice from {relayUrl}");
+                    return;
                 }
+                
+                Debug.Log($"Notice from {relayUrl}: {notice}");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error handling OK message: {ex.Message}");
+                Debug.LogError($"Error handling NOTICE message from {relayUrl}: {ex.Message}");
             }
         }
         
-        private void OnConnected(object sender, string relayUrl)
+        private void SendToAll(string message)
         {
-            Debug.Log($"Connected to relay: {relayUrl}");
+            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
             
-            // Send subscriptions to the newly connected relay
-            foreach (var subscription in _subscriptions)
+            foreach (var webSocket in _webSockets)
             {
-                string subscriptionJson = $"[\"REQ\",\"{subscription.Key}\",{subscription.Value.ToJson()}]";
-                _webSocketClient.Send(relayUrl, subscriptionJson).ContinueWith(task =>
+                try
                 {
-                    if (task.IsFaulted)
+                    if (webSocket.State == WebSocketState.Open)
                     {
-                        Debug.LogError($"Error subscribing to {relayUrl}: {task.Exception?.Message}");
+                        webSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
                     }
-                });
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Failed to send message to relay: {ex.Message}");
+                }
             }
-            
-            Connected?.Invoke(this, relayUrl);
-        }
-        
-        private void OnDisconnected(object sender, string relayUrl)
-        {
-            Debug.Log($"Disconnected from relay: {relayUrl}");
-            
-            _relayConnections.Remove(relayUrl);
-            
-            Disconnected?.Invoke(this, relayUrl);
-        }
-        
-        private void OnError(object sender, string error)
-        {
-            Debug.LogError($"WebSocket error: {error}");
-            
-            Error?.Invoke(this, error);
         }
     }
     

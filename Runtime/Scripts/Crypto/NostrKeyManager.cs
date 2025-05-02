@@ -8,15 +8,15 @@ using System.IO;
 namespace Nostr.Unity
 {
     /// <summary>
-    /// Manages Nostr private and public keys
+    /// Manages Nostr private and public keys with secure storage
     /// </summary>
     public class NostrKeyManager
     {
-        private const string NSEC_KEY = "NOSTR_NSEC";
-        private const string ENCRYPTION_KEY = "NOSTR_ENCRYPTION_KEY";
         private const string KEY_STORAGE_PATH = "nostr_keys";
         private const string PRIVATE_KEY_FILE = "private_key";
         private const string PUBLIC_KEY_FILE = "public_key";
+        private const int KEY_SIZE = 32;
+        private const int IV_SIZE = 16;
         
         /// <summary>
         /// Generates a new private key
@@ -27,7 +27,7 @@ namespace Nostr.Unity
         {
             try
             {
-                byte[] privateKey = new byte[32];
+                byte[] privateKey = new byte[KEY_SIZE];
                 using (var rng = RandomNumberGenerator.Create())
                 {
                     rng.GetBytes(privateKey);
@@ -52,6 +52,9 @@ namespace Nostr.Unity
         {
             try
             {
+                if (string.IsNullOrEmpty(privateKey))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
+                
                 string hexPrivateKey = privateKey;
                 
                 // Check if the key is in Bech32 format
@@ -232,32 +235,20 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Stores the keys with optional encryption
+        /// Stores the keys with encryption
         /// </summary>
         /// <param name="privateKey">The private key to store</param>
-        /// <param name="encrypt">Whether to encrypt the keys</param>
-        /// <param name="password">Optional password for encryption</param>
+        /// <param name="password">Password for encryption</param>
         /// <returns>True if the keys were stored successfully</returns>
-        public bool StoreKeys(string privateKey, bool encrypt = false, string password = null)
+        public bool StoreKeys(string privateKey, string password)
         {
             try
             {
                 if (string.IsNullOrEmpty(privateKey))
                     throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
                 
-                // Security warning
-                if (!encrypt)
-                {
-                    Debug.LogWarning("WARNING: Storing private keys without encryption is not recommended. " +
-                        "Anyone with access to the application's data directory could access your private keys. " +
-                        "Please use encryption with a strong password for production use.");
-                }
-                else if (string.IsNullOrEmpty(password))
-                {
-                    Debug.LogWarning("WARNING: Encryption is enabled but no password was provided. " +
-                        "The keys will be stored with a default encryption key. " +
-                        "This is not secure for production use.");
-                }
+                if (string.IsNullOrEmpty(password))
+                    throw new ArgumentException("Password cannot be null or empty", nameof(password));
                 
                 // Get the public key
                 string publicKey = GetPublicKey(privateKey);
@@ -266,20 +257,23 @@ namespace Nostr.Unity
                 string storagePath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH);
                 Directory.CreateDirectory(storagePath);
                 
-                // Store the private key
-                string privateKeyPath = Path.Combine(storagePath, PRIVATE_KEY_FILE);
-                if (encrypt)
+                // Generate a random IV
+                byte[] iv = new byte[IV_SIZE];
+                using (var rng = RandomNumberGenerator.Create())
                 {
-                    if (string.IsNullOrEmpty(password))
-                    {
-                        Debug.LogWarning("No password provided for encryption. Keys will be stored unencrypted.");
-                    }
-                    else
-                    {
-                        privateKey = EncryptKey(privateKey, password);
-                    }
+                    rng.GetBytes(iv);
                 }
-                File.WriteAllText(privateKeyPath, privateKey);
+                
+                // Encrypt the private key
+                byte[] encryptedPrivateKey = EncryptKey(privateKey, password, iv);
+                
+                // Store the private key with IV
+                string privateKeyPath = Path.Combine(storagePath, PRIVATE_KEY_FILE);
+                using (var fs = new FileStream(privateKeyPath, FileMode.Create))
+                {
+                    fs.Write(iv, 0, iv.Length);
+                    fs.Write(encryptedPrivateKey, 0, encryptedPrivateKey.Length);
+                }
                 
                 // Store the public key
                 string publicKeyPath = Path.Combine(storagePath, PUBLIC_KEY_FILE);
@@ -295,195 +289,160 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Loads the private key from PlayerPrefs
+        /// Loads the private key from storage
         /// </summary>
+        /// <param name="password">Password for decryption</param>
         /// <param name="useBech32">Whether to return the key in Bech32 format</param>
-        /// <returns>The private key, or null if not found</returns>
-        public string LoadPrivateKey(bool useBech32 = false)
+        /// <returns>The private key, or null if not found or decryption failed</returns>
+        public string LoadPrivateKey(string password, bool useBech32 = false)
         {
             try
             {
-                if (!PlayerPrefs.HasKey(NSEC_KEY))
+                if (string.IsNullOrEmpty(password))
+                    throw new ArgumentException("Password cannot be null or empty", nameof(password));
+                
+                string privateKeyPath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH, PRIVATE_KEY_FILE);
+                
+                if (!File.Exists(privateKeyPath))
                 {
                     Debug.Log("No stored private key found");
                     return null;
                 }
                 
-                string storedValue = PlayerPrefs.GetString(NSEC_KEY);
-                
-                if (string.IsNullOrEmpty(storedValue))
+                // Read the IV and encrypted key
+                byte[] fileData = File.ReadAllBytes(privateKeyPath);
+                if (fileData.Length < IV_SIZE)
                 {
-                    Debug.LogWarning("Stored key exists but is empty");
-                    DeleteStoredKeys(); // Clean up empty key
+                    Debug.LogError("Invalid key file format");
                     return null;
                 }
                 
-                try
-                {
-                    if (PlayerPrefs.HasKey(ENCRYPTION_KEY))
-                    {
-                        string encryptionKey = PlayerPrefs.GetString(ENCRYPTION_KEY);
-                        
-                        if (string.IsNullOrEmpty(encryptionKey))
-                        {
-                            Debug.LogWarning("Encryption key exists but is empty");
-                            // Continue with the stored value as-is
-                        }
-                        else
-                        {
-                            // Simple XOR decryption - should be replaced with more secure method
-                            try {
-                                storedValue = EncryptDecrypt(storedValue, encryptionKey);
-                            }
-                            catch (Exception ex) {
-                                Debug.LogError($"Failed to decrypt private key: {ex.Message}");
-                                DeleteStoredKeys(); // Clean up corrupted key
-                                return null;
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error decrypting private key: {ex.Message}");
-                    Debug.LogWarning("Using a default key for testing");
-                    DeleteStoredKeys(); // Clean up corrupted key
-                    
-                    // Create a deterministic test key if decryption fails
-                    storedValue = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-                }
+                byte[] iv = new byte[IV_SIZE];
+                byte[] encryptedKey = new byte[fileData.Length - IV_SIZE];
                 
-                // Verify the hex string is valid
-                if (!IsValidHexString(storedValue) || storedValue.Length != 64)
-                {
-                    Debug.LogError($"Invalid hex in stored private key: {storedValue}");
-                    Debug.LogWarning("Using a default key for testing");
-                    DeleteStoredKeys(); // Clean up corrupted key
-                    
-                    // Create a deterministic test key
-                    storedValue = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-                }
+                Array.Copy(fileData, 0, iv, 0, IV_SIZE);
+                Array.Copy(fileData, IV_SIZE, encryptedKey, 0, encryptedKey.Length);
+                
+                // Decrypt the key
+                string privateKey = DecryptKey(encryptedKey, password, iv);
                 
                 if (useBech32)
                 {
-                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, storedValue);
+                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, privateKey);
                 }
-                else
-                {
-                    return storedValue;
-                }
+                
+                return privateKey;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Failed to load private key: {ex.Message}");
-                DeleteStoredKeys(); // Clean up on any error
+                Debug.LogError($"Error loading private key: {ex.Message}");
                 return null;
             }
         }
         
         /// <summary>
-        /// Deletes the stored private key
+        /// Loads the public key from storage
         /// </summary>
-        public void DeleteStoredKeys()
-        {
-            PlayerPrefs.DeleteKey(NSEC_KEY);
-            PlayerPrefs.DeleteKey(ENCRYPTION_KEY);
-            PlayerPrefs.Save();
-        }
-        
-        /// <summary>
-        /// Checks if a private key is stored
-        /// </summary>
-        /// <returns>True if a private key is stored, otherwise false</returns>
-        public bool HasStoredKeys()
-        {
-            return PlayerPrefs.HasKey(NSEC_KEY);
-        }
-        
-        /// <summary>
-        /// Simple XOR encryption/decryption - should be replaced with more secure method
-        /// </summary>
-        private string EncryptDecrypt(string text, string key)
+        /// <param name="useBech32">Whether to return the key in Bech32 format</param>
+        /// <returns>The public key, or null if not found</returns>
+        public string LoadPublicKey(bool useBech32 = false)
         {
             try
             {
-                if (string.IsNullOrEmpty(text))
+                string publicKeyPath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH, PUBLIC_KEY_FILE);
+                
+                if (!File.Exists(publicKeyPath))
                 {
-                    Debug.LogWarning("Attempted to encrypt/decrypt an empty string");
-                    return string.Empty;
+                    Debug.Log("No stored public key found");
+                    return null;
                 }
                 
-                if (string.IsNullOrEmpty(key))
+                string publicKey = File.ReadAllText(publicKeyPath);
+                
+                if (useBech32)
                 {
-                    Debug.LogWarning("Attempted to encrypt/decrypt with an empty key");
-                    return text; // Return original text if no key
+                    return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, publicKey);
                 }
                 
-                // For decryption, first try to decode from Base64
-                try
+                return publicKey;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error loading public key: {ex.Message}");
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// Deletes the stored keys
+        /// </summary>
+        public void DeleteStoredKeys()
+        {
+            try
+            {
+                string storagePath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH);
+                if (Directory.Exists(storagePath))
                 {
-                    if (IsBase64String(text))
-                    {
-                        byte[] bytes = Convert.FromBase64String(text);
-                        text = Encoding.UTF8.GetString(bytes);
-                    }
-                }
-                catch (FormatException ex)
-                {
-                    Debug.LogError($"Base64 decoding failed: {ex.Message}");
-                    return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-                }
-                
-                // XOR the text with the key
-                StringBuilder result = new StringBuilder();
-                for (int i = 0; i < text.Length; i++)
-                {
-                    result.Append((char)(text[i] ^ key[i % key.Length]));
-                }
-                
-                // For encryption, convert to Base64
-                if (result.Length > 0)
-                {
-                    try
-                    {
-                        byte[] bytes = Encoding.UTF8.GetBytes(result.ToString());
-                        return Convert.ToBase64String(bytes);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"Error during base64 conversion: {ex.Message}");
-                        // Return a safe fallback value that won't cause parsing errors
-                        return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-                    }
-                }
-                else
-                {
-                    return string.Empty;
+                    Directory.Delete(storagePath, true);
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error in EncryptDecrypt: {ex.Message}");
-                // Return a safe fallback value
-                return "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                Debug.LogError($"Error deleting stored keys: {ex.Message}");
             }
         }
         
         /// <summary>
-        /// Checks if a string appears to be a valid Base64 string
+        /// Checks if keys are stored
         /// </summary>
-        private bool IsBase64String(string s)
+        /// <returns>True if keys are stored, otherwise false</returns>
+        public bool HasStoredKeys()
         {
-            if (string.IsNullOrEmpty(s))
-                return false;
-                
-            s = s.Trim();
-            return (s.Length % 4 == 0) && System.Text.RegularExpressions.Regex.IsMatch(s, @"^[a-zA-Z0-9\+/]*={0,3}$", System.Text.RegularExpressions.RegexOptions.None);
+            string privateKeyPath = Path.Combine(Application.persistentDataPath, KEY_STORAGE_PATH, PRIVATE_KEY_FILE);
+            return File.Exists(privateKeyPath);
         }
         
-        /// <summary>
-        /// Converts a hex string to byte array
-        /// </summary>
+        private byte[] EncryptKey(string key, string password, byte[] iv)
+        {
+            using (Aes aes = Aes.Create())
+            {
+                aes.Key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+                aes.IV = iv;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.PKCS7;
+                
+                using (var encryptor = aes.CreateEncryptor())
+                using (var ms = new MemoryStream())
+                {
+                    using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
+                    {
+                        byte[] keyBytes = Encoding.UTF8.GetBytes(key);
+                        cs.Write(keyBytes, 0, keyBytes.Length);
+                    }
+                    return ms.ToArray();
+                }
+            }
+        }
+        
+        private string DecryptKey(byte[] encryptedKey, string password, byte[] iv)
+        {
+            using (Aes aes = Aes.Create())
+            {
+                aes.Key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+                aes.IV = iv;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.PKCS7;
+                
+                using (var decryptor = aes.CreateDecryptor())
+                using (var ms = new MemoryStream(encryptedKey))
+                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
+                using (var sr = new StreamReader(cs))
+                {
+                    return sr.ReadToEnd();
+                }
+            }
+        }
+        
         private byte[] HexToBytes(string hex)
         {
             if (string.IsNullOrEmpty(hex))
@@ -512,9 +471,6 @@ namespace Nostr.Unity
             return bytes;
         }
         
-        /// <summary>
-        /// Converts a byte array to hex string
-        /// </summary>
         private string BytesToHex(byte[] bytes)
         {
             if (bytes == null || bytes.Length == 0)
@@ -528,24 +484,6 @@ namespace Nostr.Unity
                 hex.AppendFormat("{0:x2}", b);
             }
             return hex.ToString();
-        }
-        
-        /// <summary>
-        /// Checks if a string is a valid hexadecimal string
-        /// </summary>
-        private bool IsValidHexString(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-                return false;
-                
-            // Check if the string consists only of hex characters (0-9, a-f, A-F)
-            foreach (char c in hex)
-            {
-                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-                    return false;
-            }
-            
-            return true;
         }
     }
 } 

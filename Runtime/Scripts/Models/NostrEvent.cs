@@ -1,17 +1,16 @@
 using System;
-using System.Linq;
-using System.Text;
+using System.Collections.Generic;
 using System.Security.Cryptography;
-using UnityEngine;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using UnityEngine;
 
 namespace Nostr.Unity
 {
     /// <summary>
-    /// Represents a Nostr event according to NIP-01
+    /// Represents a Nostr event with proper validation and serialization
     /// </summary>
-    [Serializable]
     public class NostrEvent
     {
         /// <summary>
@@ -42,7 +41,7 @@ namespace Nostr.Unity
         /// The event tags (array of arrays)
         /// </summary>
         [JsonPropertyName("tags")]
-        public string[][] Tags { get; private set; } = new string[0][];
+        public string[][] Tags { get; private set; }
         
         /// <summary>
         /// The event content
@@ -57,17 +56,12 @@ namespace Nostr.Unity
         public string Signature { get; private set; }
         
         /// <summary>
-        /// Creates a new, empty Nostr event
+        /// Creates a new Nostr event
         /// </summary>
-        public NostrEvent()
-        {
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Tags = new string[0][];
-        }
-
-        /// <summary>
-        /// Creates a new Nostr event with the specified parameters
-        /// </summary>
+        /// <param name="publicKey">The event creator's public key</param>
+        /// <param name="kind">The event kind</param>
+        /// <param name="content">The event content</param>
+        /// <param name="tags">Optional event tags</param>
         public NostrEvent(string publicKey, int kind, string content, string[][] tags = null)
         {
             if (string.IsNullOrEmpty(publicKey))
@@ -79,151 +73,29 @@ namespace Nostr.Unity
             PublicKey = publicKey;
             Kind = kind;
             Content = content;
-            Tags = tags ?? new string[0][];
+            Tags = tags ?? Array.Empty<string[]>();
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
         
         /// <summary>
         /// Signs the event with a private key
         /// </summary>
-        /// <param name="privateKeyHex">The hex-encoded private key</param>
-        public void Sign(string privateKeyHex)
+        /// <param name="privateKey">The private key to sign with</param>
+        public void Sign(string privateKey)
         {
-            if (string.IsNullOrEmpty(privateKeyHex))
-                throw new ArgumentException("Private key cannot be null or empty", nameof(privateKeyHex));
+            if (string.IsNullOrEmpty(privateKey))
+                throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
             
-            // Generate the event ID (if not already set)
-            if (string.IsNullOrEmpty(Id))
-            {
-                Id = ComputeId();
-            }
+            // Compute the event ID
+            Id = ComputeId();
             
             // Sign the event
-            NostrKeyManager keyManager = new NostrKeyManager();
-            Signature = keyManager.SignMessage(GetSignatureHash(), privateKeyHex);
-        }
-        
-        /// <summary>
-        /// Computes the event ID according to NIP-01
-        /// </summary>
-        /// <returns>The hex-encoded event ID</returns>
-        public string ComputeId()
-        {
-            if (string.IsNullOrEmpty(PublicKey))
-                throw new InvalidOperationException("Public key must be set before computing ID");
-            
-            byte[] serializedEvent = GetSerializedEvent();
-            using (var sha256 = SHA256.Create())
+            using (var keyManager = new NostrKeyManager())
             {
-                byte[] hash = sha256.ComputeHash(serializedEvent);
-                return BytesToHex(hash);
+                byte[] messageHash = SHA256.HashData(Encoding.UTF8.GetBytes(GetSerializedEvent()));
+                byte[] signature = keyManager.Sign(messageHash, privateKey);
+                Signature = BytesToHex(signature);
             }
-        }
-        
-        /// <summary>
-        /// Gets the hash of the event for signature purposes (equivalent to the event ID)
-        /// </summary>
-        /// <returns>The hex-encoded event ID/hash</returns>
-        public string GetSignatureHash()
-        {
-            if (string.IsNullOrEmpty(Id))
-            {
-                Id = ComputeId();
-            }
-            return Id;
-        }
-        
-        /// <summary>
-        /// Serializes the event according to NIP-01 specification
-        /// </summary>
-        /// <returns>UTF-8 bytes of the serialized event</returns>
-        private byte[] GetSerializedEvent()
-        {
-            // Format according to NIP-01: [0, pubkey, created_at, kind, tags, content]
-            string serialized = $"[0,\"{PublicKey}\",{CreatedAt},{Kind},{SerializeTags()},\"{EscapeJsonString(Content)}\"]";
-            return Encoding.UTF8.GetBytes(serialized);
-        }
-        
-        /// <summary>
-        /// Serializes the tags array to a JSON string
-        /// </summary>
-        private string SerializeTags()
-        {
-            if (Tags == null || Tags.Length == 0)
-            {
-                return "[]";
-            }
-            
-            var tagStrings = Tags.Select(tag => 
-            {
-                var escapedElements = tag.Select(el => $"\"{EscapeJsonString(el)}\"");
-                return $"[{string.Join(",", escapedElements)}]";
-            });
-            
-            return $"[{string.Join(",", tagStrings)}]";
-        }
-        
-        /// <summary>
-        /// Escapes special characters in JSON strings
-        /// </summary>
-        private string EscapeJsonString(string str)
-        {
-            if (string.IsNullOrEmpty(str))
-            {
-                return string.Empty;
-            }
-            
-            // Use JsonSerializer to properly escape the string
-            return JsonSerializer.Serialize(str).Trim('"');
-        }
-        
-        /// <summary>
-        /// Converts a hex string to a byte array
-        /// </summary>
-        private byte[] HexToBytes(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-            {
-                return new byte[0];
-            }
-            
-            // Remove 0x prefix if present
-            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            {
-                hex = hex.Substring(2);
-            }
-            
-            // Ensure even length
-            if (hex.Length % 2 != 0)
-            {
-                hex = "0" + hex;
-            }
-            
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < bytes.Length; i++)
-            {
-                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
-            }
-            
-            return bytes;
-        }
-        
-        /// <summary>
-        /// Converts a byte array to a hex string
-        /// </summary>
-        private string BytesToHex(byte[] bytes)
-        {
-            if (bytes == null || bytes.Length == 0)
-            {
-                return string.Empty;
-            }
-            
-            StringBuilder hex = new StringBuilder(bytes.Length * 2);
-            foreach (byte b in bytes)
-            {
-                hex.AppendFormat("{0:x2}", b);
-            }
-            return hex.ToString();
         }
         
         /// <summary>
@@ -232,25 +104,63 @@ namespace Nostr.Unity
         /// <returns>True if the signature is valid, otherwise false</returns>
         public bool VerifySignature()
         {
+            if (string.IsNullOrEmpty(Id) || string.IsNullOrEmpty(Signature))
+                return false;
+            
             try
             {
-                if (string.IsNullOrEmpty(Signature) || string.IsNullOrEmpty(PublicKey))
+                using (var keyManager = new NostrKeyManager())
                 {
-                    return false;
+                    byte[] messageHash = SHA256.HashData(Encoding.UTF8.GetBytes(GetSerializedEvent()));
+                    return keyManager.VerifySignature(GetSerializedEvent(), Signature, PublicKey);
                 }
-                
-                // Compute the hash for verification
-                string hash = GetSignatureHash();
-                
-                // Verify with NostrKeyManager
-                NostrKeyManager keyManager = new NostrKeyManager();
-                return keyManager.VerifySignature(hash, Signature, PublicKey);
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error verifying event signature: {ex.Message}");
+                Debug.LogError($"Error verifying signature: {ex.Message}");
                 return false;
             }
+        }
+        
+        /// <summary>
+        /// Computes the event ID
+        /// </summary>
+        /// <returns>The computed event ID</returns>
+        private string ComputeId()
+        {
+            if (string.IsNullOrEmpty(PublicKey))
+                throw new InvalidOperationException("Public key must be set before computing ID");
+            
+            string serializedEvent = GetSerializedEvent();
+            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(serializedEvent));
+            return BytesToHex(hash);
+        }
+        
+        /// <summary>
+        /// Gets the serialized event data for signing
+        /// </summary>
+        /// <returns>The serialized event data</returns>
+        private string GetSerializedEvent()
+        {
+            var eventData = new object[] { 0, PublicKey, CreatedAt, Kind, Tags, Content };
+            return JsonSerializer.Serialize(eventData, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = false
+            });
+        }
+        
+        /// <summary>
+        /// Converts a byte array to a hex string
+        /// </summary>
+        private static string BytesToHex(byte[] bytes)
+        {
+            StringBuilder hex = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes)
+            {
+                hex.AppendFormat("{0:x2}", b);
+            }
+            return hex.ToString();
         }
     }
 } 
