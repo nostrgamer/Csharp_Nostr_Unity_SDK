@@ -1,8 +1,10 @@
 using System;
-using System.Collections.Generic;
-using System.Security.Cryptography;
+using System.Linq;
 using System.Text;
+using System.Security.Cryptography;
 using UnityEngine;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Nostr.Unity
 {
@@ -13,161 +15,242 @@ namespace Nostr.Unity
     public class NostrEvent
     {
         /// <summary>
-        /// The event ID (32-bytes lowercase hex-encoded sha256 of the serialized event data)
+        /// The event ID (32-byte hex-encoded string)
         /// </summary>
-        public string Id;
+        [JsonPropertyName("id")]
+        public string Id { get; private set; }
         
         /// <summary>
-        /// The public key of the event creator (32-bytes lowercase hex-encoded public key)
+        /// The event creator's public key (32-byte hex-encoded string)
         /// </summary>
-        public string PubKey;
+        [JsonPropertyName("pubkey")]
+        public string PublicKey { get; private set; }
         
         /// <summary>
-        /// When the event was created (Unix timestamp in seconds)
+        /// The Unix timestamp when the event was created
         /// </summary>
-        public long CreatedAt;
+        [JsonPropertyName("created_at")]
+        public long CreatedAt { get; private set; }
         
         /// <summary>
-        /// The event kind (integer indicating the type of event)
+        /// The event kind/type
         /// </summary>
-        public int Kind;
+        [JsonPropertyName("kind")]
+        public int Kind { get; private set; }
         
         /// <summary>
-        /// Tags for the event (each tag is an array of strings)
+        /// The event tags (array of arrays)
         /// </summary>
-        public List<List<string>> Tags = new List<List<string>>();
+        [JsonPropertyName("tags")]
+        public string[][] Tags { get; private set; } = new string[0][];
         
         /// <summary>
-        /// The content of the event
+        /// The event content
         /// </summary>
-        public string Content;
+        [JsonPropertyName("content")]
+        public string Content { get; private set; }
         
         /// <summary>
-        /// The signature of the event
+        /// The event signature (64-byte hex-encoded string)
         /// </summary>
-        public string Sig;
-        
-        // Static instance of the NostrKeyManager for signing and verification
-        private static NostrKeyManager _keyManager = new NostrKeyManager();
+        [JsonPropertyName("sig")]
+        public string Signature { get; private set; }
         
         /// <summary>
-        /// Creates a new Nostr event with the current timestamp
+        /// Creates a new, empty Nostr event
         /// </summary>
         public NostrEvent()
         {
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Tags = new List<List<string>>();
+            Tags = new string[0][];
+        }
+
+        /// <summary>
+        /// Creates a new Nostr event with the specified parameters
+        /// </summary>
+        public NostrEvent(string publicKey, int kind, string content, string[][] tags = null)
+        {
+            if (string.IsNullOrEmpty(publicKey))
+                throw new ArgumentException("Public key cannot be null or empty", nameof(publicKey));
+            
+            if (string.IsNullOrEmpty(content))
+                throw new ArgumentException("Content cannot be null or empty", nameof(content));
+            
+            PublicKey = publicKey;
+            Kind = kind;
+            Content = content;
+            Tags = tags ?? new string[0][];
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
         
         /// <summary>
         /// Signs the event with a private key
         /// </summary>
-        /// <param name="privateKey">The private key to sign with</param>
-        public void Sign(string privateKey)
+        /// <param name="privateKeyHex">The hex-encoded private key</param>
+        public void Sign(string privateKeyHex)
         {
-            // Calculate the event ID if not already set
+            if (string.IsNullOrEmpty(privateKeyHex))
+                throw new ArgumentException("Private key cannot be null or empty", nameof(privateKeyHex));
+            
+            // Generate the event ID (if not already set)
             if (string.IsNullOrEmpty(Id))
             {
-                Id = CalculateId();
+                Id = ComputeId();
             }
             
-            // Sign the event ID with the private key
-            Sig = _keyManager.SignMessage(Id, privateKey);
+            // Sign the event
+            NostrKeyManager keyManager = new NostrKeyManager();
+            Signature = keyManager.SignMessage(GetSignatureHash(), privateKeyHex);
+        }
+        
+        /// <summary>
+        /// Computes the event ID according to NIP-01
+        /// </summary>
+        /// <returns>The hex-encoded event ID</returns>
+        public string ComputeId()
+        {
+            if (string.IsNullOrEmpty(PublicKey))
+                throw new InvalidOperationException("Public key must be set before computing ID");
             
-            Debug.Log($"Signed event with ID: {Id}");
+            byte[] serializedEvent = GetSerializedEvent();
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] hash = sha256.ComputeHash(serializedEvent);
+                return BytesToHex(hash);
+            }
+        }
+        
+        /// <summary>
+        /// Gets the hash of the event for signature purposes (equivalent to the event ID)
+        /// </summary>
+        /// <returns>The hex-encoded event ID/hash</returns>
+        public string GetSignatureHash()
+        {
+            if (string.IsNullOrEmpty(Id))
+            {
+                Id = ComputeId();
+            }
+            return Id;
+        }
+        
+        /// <summary>
+        /// Serializes the event according to NIP-01 specification
+        /// </summary>
+        /// <returns>UTF-8 bytes of the serialized event</returns>
+        private byte[] GetSerializedEvent()
+        {
+            // Format according to NIP-01: [0, pubkey, created_at, kind, tags, content]
+            string serialized = $"[0,\"{PublicKey}\",{CreatedAt},{Kind},{SerializeTags()},\"{EscapeJsonString(Content)}\"]";
+            return Encoding.UTF8.GetBytes(serialized);
+        }
+        
+        /// <summary>
+        /// Serializes the tags array to a JSON string
+        /// </summary>
+        private string SerializeTags()
+        {
+            if (Tags == null || Tags.Length == 0)
+            {
+                return "[]";
+            }
+            
+            var tagStrings = Tags.Select(tag => 
+            {
+                var escapedElements = tag.Select(el => $"\"{EscapeJsonString(el)}\"");
+                return $"[{string.Join(",", escapedElements)}]";
+            });
+            
+            return $"[{string.Join(",", tagStrings)}]";
+        }
+        
+        /// <summary>
+        /// Escapes special characters in JSON strings
+        /// </summary>
+        private string EscapeJsonString(string str)
+        {
+            if (string.IsNullOrEmpty(str))
+            {
+                return string.Empty;
+            }
+            
+            // Use JsonSerializer to properly escape the string
+            return JsonSerializer.Serialize(str).Trim('"');
+        }
+        
+        /// <summary>
+        /// Converts a hex string to a byte array
+        /// </summary>
+        private byte[] HexToBytes(string hex)
+        {
+            if (string.IsNullOrEmpty(hex))
+            {
+                return new byte[0];
+            }
+            
+            // Remove 0x prefix if present
+            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                hex = hex.Substring(2);
+            }
+            
+            // Ensure even length
+            if (hex.Length % 2 != 0)
+            {
+                hex = "0" + hex;
+            }
+            
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            }
+            
+            return bytes;
+        }
+        
+        /// <summary>
+        /// Converts a byte array to a hex string
+        /// </summary>
+        private string BytesToHex(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+            
+            StringBuilder hex = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes)
+            {
+                hex.AppendFormat("{0:x2}", b);
+            }
+            return hex.ToString();
         }
         
         /// <summary>
         /// Verifies the event signature
         /// </summary>
         /// <returns>True if the signature is valid, otherwise false</returns>
-        public bool Verify()
+        public bool VerifySignature()
         {
-            if (string.IsNullOrEmpty(Id) || string.IsNullOrEmpty(PubKey) || string.IsNullOrEmpty(Sig))
+            try
             {
-                Debug.LogError("Cannot verify event: missing ID, PubKey, or Sig");
+                if (string.IsNullOrEmpty(Signature) || string.IsNullOrEmpty(PublicKey))
+                {
+                    return false;
+                }
+                
+                // Compute the hash for verification
+                string hash = GetSignatureHash();
+                
+                // Verify with NostrKeyManager
+                NostrKeyManager keyManager = new NostrKeyManager();
+                return keyManager.VerifySignature(hash, Signature, PublicKey);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error verifying event signature: {ex.Message}");
                 return false;
             }
-            
-            // Recalculate the ID to ensure it matches
-            string calculatedId = CalculateId();
-            if (calculatedId != Id)
-            {
-                Debug.LogError($"Event ID mismatch: {calculatedId} != {Id}");
-                return false;
-            }
-            
-            // Verify the signature against the ID and public key
-            return _keyManager.VerifySignature(Id, Sig, PubKey);
-        }
-        
-        /// <summary>
-        /// Calculates the event ID according to NIP-01
-        /// </summary>
-        /// <returns>The event ID as a lowercase hex string</returns>
-        private string CalculateId()
-        {
-            // Serialize the event data for ID calculation according to NIP-01
-            string serialized = $"[0,\"{PubKey}\",{CreatedAt},{Kind},{SerializeTags()},\"{Content}\"]";
-            
-            // Calculate SHA256 hash
-            using (SHA256 sha256 = SHA256.Create())
-            {
-                byte[] bytes = Encoding.UTF8.GetBytes(serialized);
-                byte[] hash = sha256.ComputeHash(bytes);
-                
-                // Convert to lowercase hex string
-                StringBuilder sb = new StringBuilder();
-                foreach (byte b in hash)
-                {
-                    sb.Append(b.ToString("x2"));
-                }
-                
-                return sb.ToString();
-            }
-        }
-        
-        /// <summary>
-        /// Serializes the tags for ID calculation
-        /// </summary>
-        /// <returns>The serialized tags as a JSON array</returns>
-        private string SerializeTags()
-        {
-            if (Tags == null || Tags.Count == 0)
-            {
-                return "[]";
-            }
-            
-            StringBuilder sb = new StringBuilder();
-            sb.Append('[');
-            
-            for (int i = 0; i < Tags.Count; i++)
-            {
-                List<string> tag = Tags[i];
-                sb.Append('[');
-                
-                for (int j = 0; j < tag.Count; j++)
-                {
-                    sb.Append('"');
-                    sb.Append(tag[j]);
-                    sb.Append('"');
-                    
-                    if (j < tag.Count - 1)
-                    {
-                        sb.Append(',');
-                    }
-                }
-                
-                sb.Append(']');
-                
-                if (i < Tags.Count - 1)
-                {
-                    sb.Append(',');
-                }
-            }
-            
-            sb.Append(']');
-            return sb.ToString();
         }
     }
 } 
