@@ -132,7 +132,7 @@ namespace Nostr.Unity.Crypto.Recovery
                     try
                     {
                         // Recover the public key with this recovery ID
-                        ECPoint q = RecoverPublicKey(r, s, messageHash, i, curveParams);
+                        Org.BouncyCastle.Math.EC.ECPoint q = RecoverPublicKey(r, s, messageHash, i, curveParams);
                         
                         // Convert to compressed format
                         byte[] recoveredKey = q.GetEncoded(true);
@@ -164,42 +164,62 @@ namespace Nostr.Unity.Crypto.Recovery
         /// <summary>
         /// Recovers the public key from a signature, message hash, and recovery ID
         /// </summary>
-        private ECPoint RecoverPublicKey(BigInteger r, BigInteger s, byte[] messageHash, byte recoveryId, ECDomainParameters curveParams)
+        private Org.BouncyCastle.Math.EC.ECPoint RecoverPublicKey(BigInteger r, BigInteger s, byte[] messageHash, byte recoveryId, ECDomainParameters curveParams)
         {
-            bool isYEven = (recoveryId & 1) == 0;
-            bool isSecondKey = (recoveryId >> 1) == 1;
-            
-            // Convert message hash to BigInteger
-            BigInteger e = new BigInteger(1, messageHash);
-            
-            // Get curve order
-            BigInteger n = curveParams.N;
-            
-            // If second key, add curve order to r
-            BigInteger x = isSecondKey ? r.Add(n) : r;
-            
-            // Find the curve point with x coordinate
-            ECCurve curve = curveParams.Curve;
-            ECFieldElement xFieldElement = curve.FromBigInteger(x);
-            
-            // Calculate y coordinate (y² = x³ + 7 for secp256k1)
-            ECFieldElement alpha = xFieldElement.Multiply(xFieldElement.Square().Add(curve.FromBigInteger(new BigInteger("7"))));
-            ECFieldElement beta = alpha.Sqrt();
-            
-            // Choose correct y coordinate based on isYEven
-            bool betaIsEven = beta.ToBigInteger().TestBit(0) == false;
-            ECFieldElement y = betaIsEven == isYEven ? beta : curve.FromBigInteger(curve.Q.Subtract(beta.ToBigInteger()));
-            
-            // Create point R
-            ECPoint R = curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
-            
-            // Calculate public key Q = (s * R - e * G) / r
-            ECPoint G = curveParams.G;
-            BigInteger rInverse = r.ModInverse(n);
-            
-            ECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse.ModInverse(n));
-            
-            return Q;
+            try
+            {
+                bool isYEven = (recoveryId & 1) == 0;
+                bool isSecondKey = (recoveryId >> 1) == 1;
+                
+                // Convert message hash to BigInteger
+                BigInteger e = new BigInteger(1, messageHash);
+                
+                // Get curve order
+                BigInteger n = curveParams.N;
+                
+                // If second key, add curve order to r
+                BigInteger x = isSecondKey ? r.Add(n) : r;
+                
+                // Check if x is valid for the curve
+                if (x.CompareTo(curveParams.Curve.Field.Characteristic) >= 0)
+                {
+                    throw new ArgumentException($"Invalid x-coordinate for recovery ID {recoveryId}");
+                }
+                
+                // Find the curve point with x coordinate
+                ECCurve curve = curveParams.Curve;
+                ECFieldElement xFieldElement = curve.FromBigInteger(x);
+                
+                // Calculate y coordinate (y² = x³ + 7 for secp256k1)
+                ECFieldElement alpha = xFieldElement.Multiply(xFieldElement.Square().Add(curve.FromBigInteger(new BigInteger("7"))));
+                ECFieldElement beta = alpha.Sqrt();
+                
+                // If we couldn't calculate a valid y coordinate, the signature is invalid for this recovery ID
+                if (beta == null)
+                {
+                    throw new ArgumentException($"Invalid signature: no valid y-coordinate for recovery ID {recoveryId}");
+                }
+                
+                // Choose correct y coordinate based on isYEven
+                bool betaIsEven = beta.ToBigInteger().TestBit(0) == false;
+                ECFieldElement y = betaIsEven == isYEven ? beta : curve.FromBigInteger(curve.Q.Subtract(beta.ToBigInteger()));
+                
+                // Create point R
+                Org.BouncyCastle.Math.EC.ECPoint R = curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
+                
+                // Calculate public key Q = (s * R - e * G) / r
+                Org.BouncyCastle.Math.EC.ECPoint G = curveParams.G;
+                BigInteger rInverse = r.ModInverse(n);
+                
+                Org.BouncyCastle.Math.EC.ECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
+                
+                return Q;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"Error in RecoverPublicKey for recovery ID {recoveryId}: {ex.Message}");
+                throw;
+            }
         }
         
         /// <summary>
