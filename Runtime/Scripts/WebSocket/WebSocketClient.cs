@@ -102,7 +102,7 @@ namespace Nostr.Unity
         /// <param name="relayUrl">The URL of the relay to send to</param>
         /// <param name="message">The message to send</param>
         /// <returns>A task representing the asynchronous operation</returns>
-        public async Task Send(string relayUrl, string message)
+        public async Task SendToRelay(string relayUrl, string message)
         {
             try
             {
@@ -140,7 +140,7 @@ namespace Nostr.Unity
             {
                 try
                 {
-                    await Send(relayUrl, message);
+                    await SendToRelay(relayUrl, message);
                 }
                 catch (Exception ex)
                 {

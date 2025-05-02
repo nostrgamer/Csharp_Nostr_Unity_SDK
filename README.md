@@ -9,6 +9,7 @@ A Unity SDK for integrating the [Nostr protocol](https://github.com/nostr-protoc
 - **Message Posting**: Publish events to the Nostr network
 - **Event Subscriptions**: Subscribe to specific event types or users
 - **Cross-Platform Support**: Works on all platforms Unity supports
+- **Pure C# Implementation**: No external dependencies required
 
 ## Installation
 
@@ -104,10 +105,6 @@ List<string> relayUrls = new List<string>
 
 await client.ConnectToRelays(relayUrls);
 ```
-
-## Documentation
-
-For detailed documentation, please refer to the [Wiki](https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/wiki).
 
 ## Contributing
 

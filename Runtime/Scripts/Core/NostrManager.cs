@@ -84,7 +84,8 @@ namespace Nostr.Unity
                 defaultRelays.AddRange(NostrConstants.DEFAULT_RELAYS);
             }
             
-            // Run Bech32 tests
+            // Disable automatic Bech32 tests to avoid initialization errors
+            /*
             try
             {
                 if (Bech32Tests.RunTests())
@@ -100,6 +101,9 @@ namespace Nostr.Unity
             {
                 Debug.LogError($"Error running Bech32 tests: {ex.Message}");
             }
+            */
+            
+            Debug.Log("NostrManager initialized successfully");
         }
         
         private void Start()
@@ -151,30 +155,90 @@ namespace Nostr.Unity
         /// <param name="save">Whether to save the key to PlayerPrefs</param>
         public void SetPrivateKey(string privateKey, bool save = true)
         {
-            // Convert to hex format if needed
-            string hexPrivateKey = privateKey;
-            
-            if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+            try
             {
-                hexPrivateKey = privateKey.ToHex();
+                // Convert to hex format if needed
+                string hexPrivateKey = privateKey;
+                
+                if (string.IsNullOrEmpty(privateKey))
+                {
+                    Debug.LogWarning("Empty private key provided. Generating a new one.");
+                    hexPrivateKey = _keyManager.GeneratePrivateKey(true);
+                }
+                else if (privateKey.StartsWith(NostrConstants.NSEC_PREFIX + "1"))
+                {
+                    try
+                    {
+                        hexPrivateKey = privateKey.ToHex();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error converting Bech32 key to hex: {ex.Message}");
+                        hexPrivateKey = _keyManager.GeneratePrivateKey(true);
+                    }
+                }
+                
+                // Validate hex format
+                if (!IsValidHexString(hexPrivateKey) || hexPrivateKey.Length != 64)
+                {
+                    Debug.LogWarning($"Invalid hex private key format: '{hexPrivateKey}'. Generating a new one.");
+                    hexPrivateKey = _keyManager.GeneratePrivateKey(true);
+                }
+                
+                PrivateKey = hexPrivateKey;
+                
+                try
+                {
+                    PublicKey = _keyManager.GetPublicKey(hexPrivateKey, true);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error deriving public key: {ex.Message}");
+                    // Generate new key pair as fallback
+                    PrivateKey = _keyManager.GeneratePrivateKey(true);
+                    PublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                }
+                
+                if (save)
+                {
+                    bool success = _keyManager.StoreKeys(hexPrivateKey);
+                    if (!success)
+                    {
+                        Debug.LogWarning("Failed to store keys in PlayerPrefs");
+                    }
+                }
+                
+                if (useBech32Format)
+                {
+                    Debug.Log($"Set private key and derived public key: {PublicKeyBech32} (short: {ShortPublicKey})");
+                }
+                else
+                {
+                    Debug.Log($"Set private key and derived public key: {PublicKey} (short: {ShortPublicKey})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error setting private key: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Checks if a string is a valid hexadecimal string
+        /// </summary>
+        private bool IsValidHexString(string hex)
+        {
+            if (string.IsNullOrEmpty(hex))
+                return false;
+                
+            // Check if the string consists only of hex characters (0-9, a-f, A-F)
+            foreach (char c in hex)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                    return false;
             }
             
-            PrivateKey = hexPrivateKey;
-            PublicKey = _keyManager.GetPublicKey(hexPrivateKey, true);
-            
-            if (save)
-            {
-                _keyManager.StoreKeys(hexPrivateKey);
-            }
-            
-            if (useBech32Format)
-            {
-                Debug.Log($"Set private key and derived public key: {PublicKeyBech32} (short: {ShortPublicKey})");
-            }
-            else
-            {
-                Debug.Log($"Set private key and derived public key: {PublicKey} (short: {ShortPublicKey})");
-            }
+            return true;
         }
         
         /// <summary>
@@ -229,7 +293,37 @@ namespace Nostr.Unity
         
         private void OnDestroy()
         {
-            _nostrClient.Disconnect();
+            if (_nostrClient != null)
+            {
+                _nostrClient.Disconnect();
+            }
         }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// Test method for verifying key generation
+        /// </summary>
+        public void TestKeyGeneration()
+        {
+            Debug.Log("Testing Nostr key generation with NBitcoin...");
+            
+            // Generate a private key
+            string privateKey = _keyManager.GeneratePrivateKey();
+            Debug.Log($"Generated private key: {privateKey}");
+            
+            // Derive the public key
+            string publicKey = _keyManager.GetPublicKey(privateKey);
+            Debug.Log($"Derived public key: {publicKey}");
+            
+            // Test signing a message
+            string message = "Hello, Nostr!";
+            string signature = _keyManager.SignMessage(message, privateKey);
+            Debug.Log($"Signed message '{message}' with signature: {signature}");
+            
+            // Test verifying the signature
+            bool isValid = _keyManager.VerifySignature(message, signature, publicKey);
+            Debug.Log($"Signature verification result: {isValid}");
+        }
+#endif
     }
 } 

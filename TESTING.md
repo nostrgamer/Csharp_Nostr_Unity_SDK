@@ -2,6 +2,14 @@
 
 This guide will help you set up a simple test scene to verify the basic functionality of the Nostr Unity SDK.
 
+## Prerequisites
+
+The Nostr Unity SDK has the following dependencies:
+
+1. Secp256k1.Net - a C# wrapper for the native libsecp256k1 library used for cryptographic operations
+   - Both `Secp256k1.Net.dll` and `secp256k1.dll` should be in your Unity project's `Assets/Plugins/Secp256k1Net` directory
+   - The SDK includes these files already
+
 ## Setup
 
 1. Import the package into your Unity project using the Package Manager:
@@ -24,6 +32,8 @@ This guide will help you set up a simple test scene to verify the basic function
    - Add a Button for "Generate Keys"
    - Add a Button for "Connect to Relays"
    - Add a Button for "Post Test Message"
+   - Add a TMP_InputField for "NSEC Key Input"
+   - Add a Button for "Import NSEC Key"
    - Add a TextMeshPro - Text field to display status messages (requires TextMeshPro package)
 
 ## Add Nostr Manager
@@ -59,7 +69,16 @@ public class NostrTest : MonoBehaviour
     private Button postMessageButton;
     
     [SerializeField]
+    private TMP_InputField nsecInputField;
+    
+    [SerializeField]
+    private Button importNsecButton;
+    
+    [SerializeField]
     private TMP_Text statusText;
+    
+    [SerializeField]
+    private Button testCryptoButton;
     
     private NostrManager nostrManager;
     
@@ -84,13 +103,49 @@ public class NostrTest : MonoBehaviour
         connectButton.onClick.AddListener(Connect);
         postMessageButton.onClick.AddListener(PostMessage);
         
-        UpdateStatus("Ready to test. Start by generating keys.");
+        // Set up NSEC import button
+        if (importNsecButton != null)
+        {
+            importNsecButton.onClick.AddListener(ImportNsecKey);
+        }
+        
+        // Set up test crypto button
+        if (testCryptoButton != null)
+        {
+            testCryptoButton.onClick.AddListener(TestCrypto);
+        }
+        
+        UpdateStatus("Ready to test. Start by generating or importing keys.");
     }
     
     void GenerateKeys()
     {
         nostrManager.LoadOrCreateKeys();
         UpdateStatus("Keys loaded or generated.");
+    }
+    
+    void ImportNsecKey()
+    {
+        if (nsecInputField == null || string.IsNullOrEmpty(nsecInputField.text))
+        {
+            UpdateStatus("Please enter an NSEC key first.");
+            return;
+        }
+        
+        string nsecKey = nsecInputField.text.Trim();
+        
+        try
+        {
+            nostrManager.SetPrivateKey(nsecKey);
+            UpdateStatus($"Key imported successfully! Public key: {nostrManager.ShortPublicKey}");
+            
+            // Clear the input field for security
+            nsecInputField.text = "";
+        }
+        catch (System.Exception ex)
+        {
+            UpdateStatus($"Error importing key: {ex.Message}");
+        }
     }
     
     void Connect()
@@ -103,6 +158,12 @@ public class NostrTest : MonoBehaviour
     {
         UpdateStatus("Posting test message...");
         nostrManager.PostTextNote("Hello from Unity Nostr SDK! This is a test message.");
+    }
+    
+    void TestCrypto()
+    {
+        UpdateStatus("Testing cryptography implementation...");
+        nostrManager.TestKeyGeneration();
     }
     
     void OnConnected(string relay)
@@ -156,19 +217,65 @@ public class NostrTest : MonoBehaviour
    - Drag your "Generate Keys" button to the "Generate Keys Button" field
    - Drag your "Connect" button to the "Connect Button" field
    - Drag your "Post Message" button to the "Post Message Button" field
+   - Drag your NSEC input field to the "Nsec Input Field" field
+   - Drag your "Import NSEC" button to the "Import Nsec Button" field
    - Drag your TMP_Text to the "Status Text" field
+   - Drag your "Test Crypto" button to the "Test Crypto Button" field
 
 ## Test the Implementation
 
 1. Run the scene
-2. Click "Generate Keys" - this should generate a new key pair
-3. Click "Connect to Relays" - this should simulate connecting to relays
-4. Click "Post Message" - this should simulate posting a message
+2. You can either:
+   - Click "Generate Keys" - this should generate a new key pair, or
+   - Enter an NSEC key into the input field and click "Import NSEC Key" 
+3. Click "Connect to Relays" - this should connect to relays
+4. Click "Post Message" - this should post a message to connected relays
 
-Note that this test will only simulate the operations as the actual WebSocket implementation and cryptography are placeholder implementations at this stage.
+Note that the WebSocket connection will attempt to connect to real relays, but the cryptography implementation is a placeholder at this stage.
+
+## Test the Secp256k1 Implementation
+
+To test the secp256k1 cryptography implementation, follow these steps:
+
+1. Update your NostrTest.cs script to add a button for testing the key generation (if you haven't already):
+
+```csharp
+// Add this field at the top of the NostrTest class
+[SerializeField]
+private Button testCryptoButton;
+
+// Add this line in the Start method to set up the button listener
+testCryptoButton.onClick.AddListener(TestCrypto);
+
+// Add this method to call the TestKeyGeneration method on NostrManager
+void TestCrypto()
+{
+    UpdateStatus("Testing cryptography implementation...");
+    nostrManager.TestKeyGeneration();
+}
+```
+
+2. In the Unity Editor:
+   - Add a new Button to your Canvas UI named "Test Crypto"
+   - Select your Canvas in the Hierarchy
+   - In the Inspector, drag the "Test Crypto" button to the "Test Crypto Button" field in the NostrTest component
+
+3. Run the scene and click the "Test Crypto" button
+   - Check the Console in Unity to see the debug logs from the cryptography test
+   - You should see logs showing:
+     - A generated private key
+     - The derived public key
+     - A signature for a test message
+     - Verification result for the signature
+
+This test uses the Secp256k1.Net library, which is a C# wrapper around the native libsecp256k1 library (the same one used by Bitcoin). It provides cryptographically secure implementations of all the required operations for Nostr.
+
+**Note:** If you encounter any issues with the native library loading, ensure that `secp256k1.dll` is included in your build output directory.
 
 ## Expected Results
 
 - The console should show debug messages for each operation
 - The status text should update with each action
-- No errors should appear in the console (except for warnings about unused events) 
+- When importing an NSEC key, you should see the derived public key
+- When connecting to relays, you should see connection status messages
+- When posting a message, you should see confirmation in the status text 

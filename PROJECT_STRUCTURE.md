@@ -56,6 +56,8 @@ Cryptographic utilities
 - `Crypto.meta`: Meta file for Crypto folder
 - `NostrKeyManager.cs`: Manages Nostr private and public keys
 - `NostrKeyManager.cs.meta`: Meta file for NostrKeyManager.cs
+- `Secp256k1Manager.cs`: Custom implementation of Secp256k1 cryptographic operations
+- `Secp256k1Manager.cs.meta`: Meta file for Secp256k1Manager.cs
 
 ##### Runtime/Scripts/WebSocket/
 WebSocket communication
@@ -75,6 +77,10 @@ Utility classes
 - `NostrExtensions.cs`: Extension methods for Nostr types
 - `NostrExtensions.cs.meta`: Meta file for NostrExtensions.cs
 
+## Dependencies
+
+- `Newtonsoft.Json`: Used for JSON serialization/deserialization (via Unity's package)
+
 ## Meta Files
 
 For each file and folder, Unity requires a corresponding .meta file. These files contain GUIDs that Unity uses to track assets. The meta files are generated automatically by Unity when new files are created, but we're creating them manually here to ensure consistency.
@@ -85,6 +91,7 @@ For each file and folder, Unity requires a corresponding .meta file. These files
 - [x] Implement WebSocketClient class
 - [x] Create Unity MonoBehaviour components for easier integration
 - [x] Implement Bech32 encoding/decoding
-- [ ] Add proper Secp256k1 support
+- [x] Add Secp256k1 support (placeholder implementation)
+- [ ] Replace placeholder Secp256k1 implementation with full implementation
 - [ ] Implement JSON serialization utilities
 - [ ] Add example scenes and documentation 
