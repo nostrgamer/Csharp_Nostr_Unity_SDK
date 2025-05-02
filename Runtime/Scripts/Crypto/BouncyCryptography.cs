@@ -1,57 +1,51 @@
 using System;
 using System.Security.Cryptography;
 using UnityEngine;
-
-// These will be commented out until the BouncyCastle library is added
-/*
-using Org.BouncyCastle.Asn1.Sec;
-using Org.BouncyCastle.Asn1.X9;
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
-*/
 
-namespace Nostr.Unity.Crypto
+namespace Nostr.Unity
 {
     /// <summary>
-    /// Implements secp256k1 cryptographic operations using BouncyCastle
+    /// Implementation of the ICryptographyProvider interface using BouncyCastle
     /// </summary>
-    public class BouncyCryptography
+    public class BouncyCryptography : ICryptographyProvider
     {
-        // Precomputed curve parameters for performance
-        private static readonly object _curveParams;
-        private static readonly object _secureRandom;
-
+        private readonly object _curveParams;
+        private readonly object _secureRandom;
+        
         /// <summary>
-        /// Static initializer to precompute curve parameters
+        /// Initializes a new instance of the BouncyCryptography class
         /// </summary>
-        static BouncyCryptography()
+        public BouncyCryptography()
         {
             try
             {
-                /* Will be uncommented when BouncyCastle is available
-                // Get the secp256k1 curve parameters
-                X9ECParameters curve = SecNamedCurves.GetByName("secp256k1");
-                _curveParams = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
+                BouncyCastleManager.EnsureInitialized();
                 
-                // Create a secure random number generator
+                // Get the secp256k1 curve parameters from BouncyCastle
+                var ecParams = BouncyCastleManager.GetSecp256k1Parameters();
+                _curveParams = ecParams;
+                
+                // Create a secure random generator
                 _secureRandom = new SecureRandom();
-                */
-                
-                _curveParams = null;
-                _secureRandom = null;
-                
-                Debug.Log("BouncyCryptography static initializer completed");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error in BouncyCryptography static initializer: {ex.Message}");
+                Debug.LogError($"Error initializing BouncyCryptography: {ex.Message}");
                 throw;
             }
         }
-
+        
+        /// <summary>
+        /// Gets a value indicating whether this provider is initialized
+        /// </summary>
+        public bool IsInitialized => _curveParams != null && _secureRandom != null;
+        
         /// <summary>
         /// Generates a new random private key
         /// </summary>
@@ -62,7 +56,6 @@ namespace Nostr.Unity.Crypto
             {
                 BouncyCastleManager.EnsureInitialized();
                 
-                /* Will be uncommented when BouncyCastle is available
                 // Generate a secure private key within the curve order
                 ECKeyPairGenerator keyGen = new ECKeyPairGenerator();
                 keyGen.Init(new ECKeyGenerationParameters((ECDomainParameters)_curveParams, (SecureRandom)_secureRandom));
@@ -85,15 +78,6 @@ namespace Nostr.Unity.Crypto
                     privateKey = trimmedKey;
                 }
                 
-                return privateKey;
-                */
-                
-                // Temporary placeholder until BouncyCastle is available
-                byte[] privateKey = new byte[32];
-                using (var rng = RandomNumberGenerator.Create())
-                {
-                    rng.GetBytes(privateKey);
-                }
                 return privateKey;
             }
             catch (Exception ex)
@@ -119,7 +103,6 @@ namespace Nostr.Unity.Crypto
                 
                 BouncyCastleManager.EnsureInitialized();
                 
-                /* Will be uncommented when BouncyCastle is available
                 // Convert the private key to a BigInteger
                 BigInteger d = new BigInteger(1, privateKey);
                 ValidatePrivateKey(d);
@@ -131,17 +114,6 @@ namespace Nostr.Unity.Crypto
                 // Convert to compressed public key format (33 bytes with prefix)
                 byte[] publicKey = q.GetEncoded(true);
                 return publicKey;
-                */
-                
-                // Temporary placeholder until BouncyCastle is available
-                using (var sha256 = SHA256.Create())
-                {
-                    byte[] hashed = sha256.ComputeHash(privateKey);
-                    byte[] publicKey = new byte[33];
-                    publicKey[0] = 0x02; // Compressed key prefix (even y-coordinate)
-                    Buffer.BlockCopy(hashed, 0, publicKey, 1, 32);
-                    return publicKey;
-                }
             }
             catch (Exception ex)
             {
@@ -151,11 +123,24 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Signs a message with a private key using deterministic ECDSA (RFC 6979)
+        /// Computes the SHA256 hash of a message (for signing)
         /// </summary>
-        /// <param name="messageHash">The 32-byte hash of the message</param>
-        /// <param name="privateKey">The 32-byte private key</param>
-        /// <returns>A 64-byte signature (r, s concatenated)</returns>
+        /// <param name="message">The message to hash</param>
+        /// <returns>The 32-byte hash of the message</returns>
+        public byte[] ComputeMessageHash(string message)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                return sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(message));
+            }
+        }
+
+        /// <summary>
+        /// Signs a message hash with a private key
+        /// </summary>
+        /// <param name="messageHash">The 32-byte hash of the message to sign</param>
+        /// <param name="privateKey">The 32-byte private key to sign with</param>
+        /// <returns>The 64-byte signature (r, s concatenated)</returns>
         public byte[] Sign(byte[] messageHash, byte[] privateKey)
         {
             try
@@ -172,7 +157,6 @@ namespace Nostr.Unity.Crypto
                 
                 BouncyCastleManager.EnsureInitialized();
                 
-                /* Will be uncommented when BouncyCastle is available
                 // Convert the private key to a BigInteger
                 BigInteger d = new BigInteger(1, privateKey);
                 ValidatePrivateKey(d);
@@ -212,41 +196,39 @@ namespace Nostr.Unity.Crypto
                 }
                 else
                 {
-                    Array.Copy(rBytes, 0, signatureBytes, 0, Math.Min(rBytes.Length, 32));
+                    Array.Copy(rBytes, 0, signatureBytes, 0, 32);
                 }
                 
                 // Pad s value to 32 bytes
                 if (sBytes.Length < 32)
                 {
-                    Array.Copy(sBytes, 0, signatureBytes, 32 + (32 - sBytes.Length), sBytes.Length);
+                    Array.Copy(sBytes, 0, signatureBytes, 64 - sBytes.Length, sBytes.Length);
                 }
                 else
                 {
-                    Array.Copy(sBytes, 0, signatureBytes, 32, Math.Min(sBytes.Length, 32));
+                    Array.Copy(sBytes, 0, signatureBytes, 32, 32);
                 }
                 
                 return signatureBytes;
-                */
-                
-                // Temporary placeholder until BouncyCastle is available
-                using (var hmac = new HMACSHA256(privateKey))
-                {
-                    byte[] firstHalf = hmac.ComputeHash(messageHash);
-                    using (var sha256 = SHA256.Create())
-                    {
-                        byte[] secondHalf = sha256.ComputeHash(firstHalf);
-                        byte[] signature = new byte[64];
-                        Buffer.BlockCopy(firstHalf, 0, signature, 0, 32);
-                        Buffer.BlockCopy(secondHalf, 0, signature, 32, 32);
-                        return signature;
-                    }
-                }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error signing message: {ex.Message}");
                 throw new CryptographicException("Failed to sign message", ex);
             }
+        }
+
+        /// <summary>
+        /// Signs a message hash with a private key and returns a recoverable signature
+        /// </summary>
+        /// <param name="messageHash">The 32-byte hash of the message to sign</param>
+        /// <param name="privateKey">The 32-byte private key to sign with</param>
+        /// <returns>The 64-byte signature with recovery info</returns>
+        public byte[] SignRecoverable(byte[] messageHash, byte[] privateKey)
+        {
+            // For now, this just returns a regular signature
+            // Proper recoverable signature implementation will be added
+            return Sign(messageHash, privateKey);
         }
 
         /// <summary>
@@ -277,7 +259,6 @@ namespace Nostr.Unity.Crypto
                 
                 BouncyCastleManager.EnsureInitialized();
                 
-                /* Will be uncommented when BouncyCastle is available
                 // Extract r and s from the signature
                 byte[] rBytes = new byte[32];
                 byte[] sBytes = new byte[32];
@@ -298,11 +279,6 @@ namespace Nostr.Unity.Crypto
                 
                 // Verify the signature
                 return signer.VerifySignature(messageHash, r, s);
-                */
-                
-                // Temporary placeholder until BouncyCastle is available
-                Debug.LogWarning("Using simplified signature verification (always returns true)");
-                return true;
             }
             catch (Exception ex)
             {
@@ -312,41 +288,11 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Computes the SHA256 hash of a message
-        /// </summary>
-        /// <param name="message">The message to hash</param>
-        /// <returns>The 32-byte hash of the message</returns>
-        public byte[] ComputeMessageHash(string message)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(message))
-                {
-                    Debug.LogWarning("Empty message provided for hashing");
-                    message = "";
-                }
-                
-                // Convert the message to bytes and hash it using SHA256
-                byte[] messageBytes = System.Text.Encoding.UTF8.GetBytes(message);
-                using (var sha256 = SHA256.Create())
-                {
-                    return sha256.ComputeHash(messageBytes);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error computing message hash: {ex.Message}");
-                throw new CryptographicException("Failed to compute message hash", ex);
-            }
-        }
-
-        /// <summary>
         /// Validates that a private key is within the allowed range for the curve
         /// </summary>
         /// <param name="d">The private key as a BigInteger</param>
-        private void ValidatePrivateKey(object d)
+        private void ValidatePrivateKey(BigInteger d)
         {
-            /* Will be uncommented when BouncyCastle is available
             if (d.SignValue <= 0)
             {
                 throw new CryptographicException("Invalid private key: must be positive");
@@ -357,7 +303,6 @@ namespace Nostr.Unity.Crypto
             {
                 throw new CryptographicException("Invalid private key: outside curve order");
             }
-            */
         }
     }
 } 

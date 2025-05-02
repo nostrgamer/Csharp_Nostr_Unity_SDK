@@ -1,7 +1,6 @@
 using System;
 using System.Security.Cryptography;
 using UnityEngine;
-using Nostr.Unity.Crypto;
 using Nostr.Unity.Crypto.Recovery;
 
 namespace Nostr.Unity

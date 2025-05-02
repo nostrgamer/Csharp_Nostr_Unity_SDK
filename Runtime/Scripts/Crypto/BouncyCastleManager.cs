@@ -1,102 +1,88 @@
 using System;
-using System.Linq;
-using System.Text;
+using System.IO;
 using UnityEngine;
+using Org.BouncyCastle.Asn1.Sec;
+using Org.BouncyCastle.Asn1.X9;
+using Org.BouncyCastle.Crypto.Parameters;
 
-namespace Nostr.Unity.Crypto
+namespace Nostr.Unity
 {
     /// <summary>
-    /// Manages the integration with BouncyCastle cryptography library
+    /// Manages initialization and setup of the BouncyCastle library
     /// </summary>
     public static class BouncyCastleManager
     {
-        private static bool _isInitialized = false;
-        private static bool _isBouncyCastleAvailable = false;
-
+        private static bool _initialized = false;
+        private static ECDomainParameters _secp256k1Parameters;
+        
         /// <summary>
-        /// Static initializer to validate BouncyCastle availability
+        /// Gets a value indicating whether the manager is initialized
         /// </summary>
-        static BouncyCastleManager()
-        {
-            try
-            {
-                // Try to access a BouncyCastle type to confirm the library is loaded
-                var typeName = "Org.BouncyCastle.Crypto.Digests.Sha256Digest";
-                var type = Type.GetType(typeName) ?? 
-                           AppDomain.CurrentDomain.GetAssemblies()
-                           .SelectMany(a => a.GetTypes())
-                           .FirstOrDefault(t => t.FullName == typeName);
-                
-                if (type != null)
-                {
-                    _isBouncyCastleAvailable = true;
-                    Debug.Log("BouncyCastle library loaded successfully.");
-                }
-                else
-                {
-                    Debug.LogWarning("BouncyCastle type not found. The library may not be properly loaded.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error initializing BouncyCastle: {ex.Message}");
-                _isBouncyCastleAvailable = false;
-            }
-        }
-
+        public static bool IsInitialized => _initialized;
+        
         /// <summary>
-        /// Initializes the BouncyCastle library
+        /// Initializes the BouncyCastle library and validates it's available
         /// </summary>
         /// <returns>True if initialization was successful</returns>
         public static bool Initialize()
         {
-            if (_isInitialized)
-                return _isBouncyCastleAvailable;
-            
+            if (_initialized)
+                return true;
+                
             try
             {
-                if (!_isBouncyCastleAvailable)
+                Debug.Log("Initializing BouncyCastleManager...");
+                
+                // Verify BouncyCastle library is available
+                Type ecParamsType = typeof(ECDomainParameters);
+                if (ecParamsType == null)
                 {
-                    Debug.LogError("BouncyCastle library is not available. Cannot initialize.");
+                    Debug.LogError("BouncyCastle.Crypto library not found");
                     return false;
                 }
                 
-                // Additional initialization if needed
-                _isInitialized = true;
-                Debug.Log("BouncyCastle manager initialized successfully.");
+                // Get the secp256k1 curve parameters
+                X9ECParameters curve = SecNamedCurves.GetByName("secp256k1");
+                if (curve == null)
+                {
+                    Debug.LogError("Failed to get secp256k1 curve parameters");
+                    return false;
+                }
+                
+                _secp256k1Parameters = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
+                
+                _initialized = true;
+                Debug.Log("BouncyCastleManager initialized successfully");
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error initializing BouncyCastle manager: {ex.Message}");
+                Debug.LogError($"Error initializing BouncyCastleManager: {ex.Message}");
                 return false;
             }
         }
-
+        
         /// <summary>
-        /// Checks if BouncyCastle is available and initialized
-        /// </summary>
-        /// <returns>True if ready to use</returns>
-        public static bool IsReady()
-        {
-            return _isBouncyCastleAvailable && _isInitialized;
-        }
-
-        /// <summary>
-        /// Ensures the library is initialized before use
+        /// Ensures that the manager is initialized
         /// </summary>
         /// <exception cref="InvalidOperationException">Thrown if initialization fails</exception>
-        internal static void EnsureInitialized()
+        public static void EnsureInitialized()
         {
-            if (!_isInitialized && !Initialize())
+            if (!_initialized && !Initialize())
             {
-                throw new InvalidOperationException("BouncyCastle library is not initialized");
+                throw new InvalidOperationException("BouncyCastleManager failed to initialize");
             }
-            
-            if (!_isBouncyCastleAvailable)
-            {
-                throw new InvalidOperationException("BouncyCastle library is not available");
-            }
+        }
+        
+        /// <summary>
+        /// Gets the secp256k1 curve parameters
+        /// </summary>
+        /// <returns>The curve parameters</returns>
+        /// <exception cref="InvalidOperationException">Thrown if the manager is not initialized</exception>
+        public static ECDomainParameters GetSecp256k1Parameters()
+        {
+            EnsureInitialized();
+            return _secp256k1Parameters;
         }
     }
 } 
