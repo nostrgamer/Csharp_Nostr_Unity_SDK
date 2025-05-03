@@ -53,11 +53,10 @@ This SDK requires the following external libraries (DLLs):
 ### Quick Setup
 
 1. Add the SDK to your Unity project
-2. Create a new GameObject in your scene
+2. Create a GameObject in your scene
 3. Add the `NostrManager.cs` script as a component to it
-4. Configure the NostrManager in the Inspector (optional: add default relays)
-5. Create a new script to interact with NostrManager (e.g., `MyNostrApp.cs`) and attach it to a GameObject
-6. Copy and paste the following example code:
+4. Create a script for your application logic and attach it to a GameObject
+5. Use the following example code as a starting point:
 
 ```csharp
 using UnityEngine;
@@ -148,13 +147,11 @@ public class MyNostrApp : MonoBehaviour
 }
 ```
 
-This example demonstrates the recommended way to use the SDK. The `NostrManager` component handles the complexity of key management, relay connections, and event signing for you.
-
 ### What NostrManager Does For You
 
 The NostrManager component automatically:
 1. Initializes cryptography
-2. Generates or loads keys
+2. Generates or loads keys (keys are automatically generated if they don't exist)
 3. Manages relay connections
 4. Handles event signing
 5. Provides a simple API for common operations
@@ -222,4 +219,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgements
 
 - [Nostr Protocol](https://github.com/nostr-protocol/nips)
-- [BouncyCastle](https://www.bouncycastle.org/) 
+- [BouncyCastle](https://www.bouncycastle.org/)

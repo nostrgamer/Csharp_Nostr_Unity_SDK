@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using UnityEngine;
 
 namespace Nostr.Unity.Utils
 {
@@ -8,7 +9,7 @@ namespace Nostr.Unity.Utils
     /// </summary>
     public static class NostrExtensions
     {
-        private static readonly Regex HexRegex = new Regex("^[0-9a-fA-F]{64}$", RegexOptions.Compiled);
+        private static readonly Regex HexRegex = new Regex("^[0-9a-fA-F]{64}$|^(02|03)[0-9a-fA-F]{64}$", RegexOptions.Compiled);
         
         /// <summary>
         /// Checks if a string is a valid hex key (64 hex characters)
@@ -116,18 +117,23 @@ namespace Nostr.Unity.Utils
             if (IsValidNpub(hexKey))
                 return hexKey;
                 
-            // Convert from hex to npub
-            if (IsValidHexKey(hexKey))
-                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hexKey);
-                
-            // Try to convert from nsec
-            if (IsValidNsec(hexKey))
+            // Validate hex format more thoroughly
+            if (!IsValidHexKey(hexKey))
             {
-                string hex = ToHex(hexKey);
-                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hex);
+                Debug.LogError($"Invalid hex key format: '{hexKey}'. Must be a 64-character hex string.");
+                throw new ArgumentException("Invalid key format - not a valid 64-character hex string", nameof(hexKey));
             }
             
-            throw new ArgumentException("Invalid key format", nameof(hexKey));
+            try
+            {
+                // Convert from hex to npub
+                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hexKey);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error encoding key to Bech32: {ex.Message}");
+                throw new ArgumentException($"Error converting key to Bech32: {ex.Message}", nameof(hexKey), ex);
+            }
         }
         
         /// <summary>

@@ -123,8 +123,35 @@ namespace Nostr.Unity.Utils
             if (string.IsNullOrEmpty(hexData))
                 throw new ArgumentException("Hex data cannot be null or empty", nameof(hexData));
             
-            byte[] data = HexToBytes(hexData);
-            return Encode(prefix, data);
+            // Validate that this is a proper hex string
+            if (!System.Text.RegularExpressions.Regex.IsMatch(hexData, "^[0-9a-fA-F]+$"))
+                throw new ArgumentException($"Invalid hex string: '{hexData}'. Must contain only hexadecimal characters (0-9, a-f, A-F).", nameof(hexData));
+            
+            // Ensure expected length for public/private keys
+            if (prefix == "npub" || prefix == "nsec")
+            {
+                // Handle compressed key format (02/03 prefix) for public keys
+                if (prefix == "npub" && hexData.Length == 66 && (hexData.StartsWith("02") || hexData.StartsWith("03")))
+                {
+                    // Remove the compression prefix for bech32 encoding
+                    hexData = hexData.Substring(2);
+                }
+                // For all other cases, enforce 64 character length
+                else if (hexData.Length != 64)
+                {
+                    throw new ArgumentException($"Invalid key length: {hexData.Length}. Expected 64 characters for {prefix} keys.", nameof(hexData));
+                }
+            }
+            
+            try
+            {
+                byte[] data = HexToBytes(hexData);
+                return Encode(prefix, data);
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException($"Error encoding hex data: {ex.Message}", nameof(hexData), ex);
+            }
         }
         
         /// <summary>

@@ -70,7 +70,16 @@ namespace Nostr.Unity
         
         private void Awake()
         {
-            _nostrClient = new NostrClient();
+            // Properly handle NostrClient creation/discovery
+            _nostrClient = FindObjectOfType<NostrClient>();
+            if (_nostrClient == null)
+            {
+                // Auto-create a NostrClient GameObject
+                GameObject clientObject = new GameObject("NostrClient");
+                _nostrClient = clientObject.AddComponent<NostrClient>();
+                Debug.Log("Created NostrClient GameObject automatically");
+            }
+            
             _keyManager = new NostrKeyManager();
             
             // Subscribe to events
@@ -109,6 +118,20 @@ namespace Nostr.Unity
         
         private void Start()
         {
+            // Initialize the Secp256k1 library if not already initialized
+            if (!Secp256k1Manager.Initialize())
+            {
+                Debug.LogError("Failed to initialize Secp256k1 library. Key operations will not work.");
+            }
+            
+            // If no keys exist and we're trying to connect, force enable auto-generation
+            if (!_keyManager.HasStoredKeys())
+            {
+                // Automatically enable key generation for better user experience
+                autoGenerateKeys = true;
+                Debug.Log("No keys found, auto-generation enabled automatically");
+            }
+            
             if (connectOnStart)
             {
                 LoadOrCreateKeys();
@@ -121,31 +144,85 @@ namespace Nostr.Unity
         /// </summary>
         public void LoadOrCreateKeys()
         {
-            PrivateKey = _keyManager.LoadPrivateKey("testpassword", false); // Load in hex format
-            
-            if (string.IsNullOrEmpty(PrivateKey) && autoGenerateKeys)
+            try
             {
-                Debug.Log("No keys found, generating new ones...");
-                PrivateKey = _keyManager.GeneratePrivateKey(true); // Generate in hex format
-                _keyManager.StoreKeys(PrivateKey, "testpassword");
-            }
-            
-            if (!string.IsNullOrEmpty(PrivateKey))
-            {
-                PublicKey = _keyManager.GetPublicKey(PrivateKey, true); // Get in hex format
+                PrivateKey = _keyManager.LoadPrivateKey("testpassword", false); // Load in hex format
                 
-                if (useBech32Format)
+                if (string.IsNullOrEmpty(PrivateKey))
                 {
-                    Debug.Log($"Loaded public key: {PublicKeyBech32} (short: {ShortPublicKey})");
+                    Debug.Log("No stored private key found");
+                    
+                    if (autoGenerateKeys)
+                    {
+                        Debug.Log("Auto-generating new keys...");
+                        // Generate private key in hex format
+                        PrivateKey = _keyManager.GeneratePrivateKey(true);
+                        
+                        // Validate the generated key
+                        if (!IsValidHexString(PrivateKey) || PrivateKey.Length != 64)
+                        {
+                            Debug.LogError($"Generated key is invalid: {PrivateKey}");
+                            return;
+                        }
+                        
+                        // Store the newly generated keys
+                        bool saved = _keyManager.StoreKeys(PrivateKey, "testpassword");
+                        if (!saved)
+                        {
+                            Debug.LogWarning("Failed to store newly generated keys");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("No private key available. Please set one or enable auto-generation.");
+                        return;
+                    }
                 }
-                else
+                
+                // Always derive the public key from the private key
+                if (!string.IsNullOrEmpty(PrivateKey))
                 {
-                    Debug.Log($"Loaded public key: {PublicKey} (short: {ShortPublicKey})");
+                    // Get public key in hex format
+                    PublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                    
+                    // Ensure the public key is valid before trying to convert to Bech32
+                    if (!IsValidHexString(PublicKey) || (PublicKey.Length != 64 && PublicKey.Length != 66))
+                    {
+                        Debug.LogError($"Invalid public key format: {PublicKey}");
+                        return;
+                    }
+                    
+                    // If we have a compressed key (66 chars with 02 or 03 prefix), convert for bech32
+                    if (PublicKey.Length == 66 && (PublicKey.StartsWith("02") || PublicKey.StartsWith("03")))
+                    {
+                        // Remove compression prefix for bech32 encoding
+                        PublicKey = PublicKey.Substring(2);
+                        Debug.Log($"Converted compressed public key to format for bech32 encoding: {PublicKey}");
+                    }
+                    
+                    // Log the key in appropriate format
+                    if (useBech32Format)
+                    {
+                        try
+                        {
+                            string bech32PublicKey = Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, PublicKey);
+                            Debug.Log($"Loaded public key: {bech32PublicKey} (short: {bech32PublicKey.ToShortKey()})");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Error converting public key to Bech32: {ex.Message}");
+                            Debug.Log($"Using hex format instead. Public key: {PublicKey}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.Log($"Loaded public key: {PublicKey} (short: {PublicKey.ToShortKey()})");
+                    }
                 }
             }
-            else
+            catch (Exception ex)
             {
-                Debug.LogWarning("No private key available. Please set one or enable auto-generation.");
+                Debug.LogError($"Error in LoadOrCreateKeys: {ex.Message}");
             }
         }
         
