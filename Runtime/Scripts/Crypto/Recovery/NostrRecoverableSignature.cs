@@ -240,7 +240,7 @@ namespace Nostr.Unity.Crypto.Recovery
             return true;
         }
 
-        private static ECPoint RecoverPublicKey(byte[] signature, byte[] messageHash, ECCurve curve)
+        private static Org.BouncyCastle.Math.EC.ECPoint RecoverPublicKey(byte[] signature, byte[] messageHash, Org.BouncyCastle.Math.EC.ECCurve curve)
         {
             // Extract r and s from signature
             byte[] rBytes = new byte[32];
@@ -248,8 +248,8 @@ namespace Nostr.Unity.Crypto.Recovery
             Array.Copy(signature, 0, rBytes, 0, 32);
             Array.Copy(signature, 32, sBytes, 0, 32);
             
-            BigInteger r = new BigInteger(1, rBytes);
-            BigInteger s = new BigInteger(1, sBytes);
+            Org.BouncyCastle.Math.BigInteger r = new Org.BouncyCastle.Math.BigInteger(1, rBytes);
+            Org.BouncyCastle.Math.BigInteger s = new Org.BouncyCastle.Math.BigInteger(1, sBytes);
             
             // Calculate y-coordinate from x-coordinate
             var x = curve.FromBigInteger(r);
@@ -260,20 +260,22 @@ namespace Nostr.Unity.Crypto.Recovery
             var y = beta;
             if (signature[64] % 2 == 1)
             {
-                y = curve.Field.Characteristic.Subtract(beta);
+                y = curve.FromBigInteger(curve.Field.Characteristic.Subtract(beta.ToBigInteger()));
             }
             
             // Create point R
             var R = curve.CreatePoint(r, y.ToBigInteger());
             
             // Calculate public key Q
-            var e = new BigInteger(1, messageHash);
+            var e = new Org.BouncyCastle.Math.BigInteger(1, messageHash);
             var rInv = r.ModInverse(curve.Order);
             var u1 = e.Multiply(rInv).Mod(curve.Order);
             var u2 = s.Multiply(rInv).Mod(curve.Order);
             
-            var Q = R.Multiply(u1).Add(curve.G.Multiply(u2));
-            return Q;
+            // This static method does not have access to the generator point (G), so this code is likely unused or should be refactored.
+            // var Q = R.Multiply(u1).Add(curve.G.Multiply(u2));
+            // return Q;
+            throw new NotImplementedException("This static RecoverPublicKey method is not implemented correctly. Use the instance method with ECDomainParameters.");
         }
     }
 } 

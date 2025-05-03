@@ -21,28 +21,24 @@ namespace Nostr.Unity.Tests
         
         private IEnumerator RunTests()
         {
+            Debug.Log("Starting Nostr crypto tests...");
             try
             {
-                Debug.Log("Starting Nostr crypto tests...");
-                
                 // Test 1: Key Generation and Storage
                 TestKeyGeneration();
-                
                 // Test 2: Signing and Verification
                 TestSigningAndVerification();
-                
                 // Test 3: Event Creation and Signing
                 TestEventSigning();
-                
-                // Test 4: Connect to Relay and Publish
-                yield return TestRelayConnection();
-                
-                Debug.Log("All tests completed successfully!");
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Test failed: {ex.Message}");
+                yield break;
             }
+            // Test 4: Connect to Relay and Publish (yield outside try/catch)
+            yield return TestRelayConnection();
+            Debug.Log("All tests completed successfully!");
         }
         
         private void TestKeyGeneration()
@@ -132,42 +128,42 @@ namespace Nostr.Unity.Tests
         private IEnumerator TestRelayConnection()
         {
             Debug.Log("Testing relay connection...");
-            
+            bool connected = false;
+            bool published = false;
+            Exception caughtException = null;
+            // Connect to a test relay
+            yield return _client.ConnectToRelay("wss://relay.damus.io", result => connected = result);
+            if (!connected)
+            {
+                Debug.LogError("Failed to connect to relay");
+                yield break;
+            }
             try
             {
-                // Connect to a test relay
-                bool connected = false;
-                yield return _client.ConnectToRelay("wss://relay.damus.io", result => connected = result);
-                
-                if (!connected)
-                {
-                    Debug.LogError("Failed to connect to relay");
-                    yield break;
-                }
-                
                 // Create a test event
                 string privateKey = _keyManager.GeneratePrivateKey();
                 string publicKey = _keyManager.GetPublicKey(privateKey);
-                
                 var nostrEvent = new NostrEvent(publicKey, (int)NostrEventKind.TextNote, "Test message from Unity SDK");
                 nostrEvent.Sign(privateKey);
-                
                 // Publish the event
-                bool published = false;
                 yield return _client.PublishEvent(nostrEvent, result => published = result);
-                
-                if (published)
-                {
-                    Debug.Log("Event published successfully!");
-                }
-                else
-                {
-                    Debug.LogError("Failed to publish event");
-                }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Relay test failed: {ex.Message}");
+                caughtException = ex;
+            }
+            if (caughtException != null)
+            {
+                Debug.LogError($"Relay test failed: {caughtException.Message}");
+                yield break;
+            }
+            if (published)
+            {
+                Debug.Log("Event published successfully!");
+            }
+            else
+            {
+                Debug.LogError("Failed to publish event");
             }
         }
     }

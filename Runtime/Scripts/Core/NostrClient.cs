@@ -75,28 +75,29 @@ namespace Nostr.Unity
                 onComplete?.Invoke(false);
                 yield break;
             }
-            
-            if (_webSockets.ContainsKey(relayUrl))
+            if (_relayUrls.Contains(relayUrl))
             {
                 onComplete?.Invoke(true);
                 yield break;
             }
-            
             bool connected = false;
             Exception connectionError = null;
-            
+            var ws = new ClientWebSocket();
+            Task connectTask = null;
             try
             {
-                var ws = new WebSocket(relayUrl);
-                _webSockets[relayUrl] = ws;
-                _relayUrls.Add(relayUrl);
-                
-                var connectTask = ws.Connect();
+                connectTask = ws.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+            }
+            catch (Exception ex)
+            {
+                connectionError = ex;
+            }
+            if (connectTask != null)
+            {
                 while (!connectTask.IsCompleted)
                 {
                     yield return null;
                 }
-                
                 if (connectTask.IsFaulted)
                 {
                     connectionError = connectTask.Exception;
@@ -106,18 +107,16 @@ namespace Nostr.Unity
                     connected = true;
                 }
             }
-            catch (Exception ex)
+            if (connected)
             {
-                connectionError = ex;
+                _webSockets.Add(ws);
+                _relayUrls.Add(relayUrl);
+                StartCoroutine(ReceiveMessagesCoroutine(ws, relayUrl));
             }
-            
-            if (connectionError != null)
+            else if (connectionError != null)
             {
                 Debug.LogError($"Error connecting to relay {relayUrl}: {connectionError.Message}");
-                _webSockets.Remove(relayUrl);
-                _relayUrls.Remove(relayUrl);
             }
-            
             onComplete?.Invoke(connected);
         }
         
@@ -129,23 +128,28 @@ namespace Nostr.Unity
         public IEnumerator Disconnect(Action onComplete = null)
         {
             _cancellationTokenSource.Cancel();
-            
             foreach (var ws in _webSockets)
             {
+                Task closeTask = null;
                 try
                 {
-                    var closeTask = ws.Close();
-                    while (!closeTask.IsCompleted)
+                    if (ws.State == WebSocketState.Open)
                     {
-                        yield return null;
+                        closeTask = ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error closing WebSocket: {ex.Message}");
                 }
+                if (closeTask != null)
+                {
+                    while (!closeTask.IsCompleted)
+                    {
+                        yield return null;
+                    }
+                }
             }
-            
             _webSockets.Clear();
             _relayUrls.Clear();
             _subscriptions.Clear();
