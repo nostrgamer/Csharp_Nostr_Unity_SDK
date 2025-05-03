@@ -2,11 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 using Nostr.Unity.Utils;
 
 namespace Nostr.Unity
@@ -20,10 +19,6 @@ namespace Nostr.Unity
         private readonly List<string> _relayUrls = new List<string>();
         private readonly Dictionary<string, List<Action<NostrEvent>>> _subscriptions = new Dictionary<string, List<Action<NostrEvent>>>();
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
-        private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
         
         private const int RECONNECT_DELAY_MS = 5000;
         private const int MAX_RECONNECT_ATTEMPTS = 3;
@@ -174,7 +169,7 @@ namespace Nostr.Unity
                     throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
                 
                 var eventMessage = new object[] { "EVENT", nostrEvent };
-                string jsonMessage = JsonSerializer.Serialize(eventMessage, _jsonOptions);
+                string jsonMessage = JsonConvert.SerializeObject(eventMessage);
                 
                 foreach (var webSocket in _webSockets)
                 {
@@ -219,7 +214,7 @@ namespace Nostr.Unity
             
             // Send subscription to all connected relays
             var subscriptionMessage = new object[] { "REQ", subscriptionId, filter };
-            string jsonMessage = JsonSerializer.Serialize(subscriptionMessage, _jsonOptions);
+            string jsonMessage = JsonConvert.SerializeObject(subscriptionMessage);
             SendToAll(jsonMessage);
             
             return subscriptionId;
@@ -238,7 +233,7 @@ namespace Nostr.Unity
             {
                 // Send close message to all connected relays
                 var closeMessage = new object[] { "CLOSE", subscriptionId };
-                string jsonMessage = JsonSerializer.Serialize(closeMessage, _jsonOptions);
+                string jsonMessage = JsonConvert.SerializeObject(closeMessage);
                 SendToAll(jsonMessage);
             }
         }
@@ -300,7 +295,7 @@ namespace Nostr.Unity
         {
             try
             {
-                var messageArray = JsonSerializer.Deserialize<object[]>(message, _jsonOptions);
+                var messageArray = JsonConvert.DeserializeObject<object[]>(message);
                 
                 if (messageArray == null || messageArray.Length < 2)
                 {
@@ -356,7 +351,7 @@ namespace Nostr.Unity
                 }
                 
                 var eventJson = messageArray[2].ToString();
-                var nostrEvent = JsonSerializer.Deserialize<NostrEvent>(eventJson, _jsonOptions);
+                var nostrEvent = JsonConvert.DeserializeObject<NostrEvent>(eventJson);
                 
                 if (nostrEvent == null)
                 {

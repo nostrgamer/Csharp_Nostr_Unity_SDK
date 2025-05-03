@@ -9,6 +9,7 @@
     "precompiledReferences": [
         "NBitcoin.dll",
         "BouncyCastle.Crypto.dll",
+        "Newtonsoft.Json.dll",
         "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
         "Microsoft.Extensions.DependencyInjection.dll",
         "Microsoft.Extensions.Options.dll",

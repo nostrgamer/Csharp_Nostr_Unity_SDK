@@ -2,8 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 using UnityEngine;
 using Nostr.Unity.Utils;
 
@@ -17,43 +16,43 @@ namespace Nostr.Unity
         /// <summary>
         /// The event ID (32-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("id")]
+        [JsonProperty("id")]
         public string Id { get; private set; }
         
         /// <summary>
         /// The event creator's public key (32-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("pubkey")]
+        [JsonProperty("pubkey")]
         public string PublicKey { get; private set; }
         
         /// <summary>
         /// The Unix timestamp when the event was created
         /// </summary>
-        [JsonPropertyName("created_at")]
+        [JsonProperty("created_at")]
         public long CreatedAt { get; private set; }
         
         /// <summary>
         /// The event kind/type
         /// </summary>
-        [JsonPropertyName("kind")]
+        [JsonProperty("kind")]
         public int Kind { get; private set; }
         
         /// <summary>
         /// The event tags (array of arrays)
         /// </summary>
-        [JsonPropertyName("tags")]
+        [JsonProperty("tags")]
         public string[][] Tags { get; private set; }
         
         /// <summary>
         /// The event content
         /// </summary>
-        [JsonPropertyName("content")]
+        [JsonProperty("content")]
         public string Content { get; private set; }
         
         /// <summary>
         /// The event signature (64-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("sig")]
+        [JsonProperty("sig")]
         public string Signature { get; private set; }
         
         /// <summary>
@@ -141,11 +140,7 @@ namespace Nostr.Unity
         private string GetSerializedEvent()
         {
             var eventData = new object[] { 0, PublicKey, CreatedAt, Kind, Tags, Content };
-            return JsonSerializer.Serialize(eventData, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = false
-            });
+            return JsonConvert.SerializeObject(eventData);
         }
     }
 } 
