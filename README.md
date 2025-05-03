@@ -62,6 +62,7 @@ This SDK requires the following external libraries (DLLs):
 ```csharp
 using UnityEngine;
 using Nostr.Unity;
+using System.Collections;
 
 public class MyNostrApp : MonoBehaviour
 {
@@ -115,30 +116,34 @@ public class MyNostrApp : MonoBehaviour
         if (nostrManager == null) return;
         
         // The NostrManager handles key management and signing internally
-        nostrManager.PublishTextNote(content, (success) => {
-            Debug.Log(success ? "Note published successfully" : "Failed to publish note");
-        });
+        nostrManager.PostTextNote(content);
     }
     
-    // Example: Connect to a specific relay
-    public void ConnectToRelay(string relayUrl)
+    // Example: Connect to default relays
+    public void ConnectToDefaultRelays()
     {
         if (nostrManager == null) return;
         
-        nostrManager.ConnectToRelay(relayUrl);
+        nostrManager.ConnectToRelays();
     }
     
     // Example: Subscribe to notes from a specific user
     public void SubscribeToUser(string publicKey)
     {
-        if (nostrManager == null) return;
+        if (nostrManager == null || nostrManager.Client == null) return;
         
         var filter = new Filter();
-        filter.Authors = new System.Collections.Generic.List<string> { publicKey };
-        filter.Kinds = new System.Collections.Generic.List<int> { (int)NostrEventKind.TextNote };
+        filter.Authors = new string[] { publicKey };
+        filter.Kinds = new int[] { (int)NostrEventKind.TextNote };
         
-        string subscriptionId = nostrManager.Subscribe(filter);
+        string subscriptionId = nostrManager.Client.Subscribe(filter, OnSubscriptionEventReceived);
         Debug.Log($"Subscribed to user with ID: {subscriptionId}");
+    }
+    
+    // Helper method to handle events from subscription
+    private void OnSubscriptionEventReceived(NostrEvent nostrEvent)
+    {
+        Debug.Log($"Received note: {nostrEvent.Content}");
     }
 }
 ```
