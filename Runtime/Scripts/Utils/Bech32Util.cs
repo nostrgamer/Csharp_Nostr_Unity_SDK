@@ -1,16 +1,24 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using NBitcoin;
-using NBitcoin.DataEncoders;
 using System.Text;
 
 namespace Nostr.Unity.Utils
 {
     /// <summary>
-    /// Utility class for Bech32 encoding and decoding using NBitcoin's implementation.
+    /// Utility class for Bech32 encoding and decoding
     /// </summary>
     public static class Bech32Util
     {
+        // Bech32 character set for encoding
+        private const string CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+        
+        // Bech32 separator
+        private const char SEPARATOR = '1';
+        
+        // Bech32 checksum generator polynomial values
+        private static readonly uint[] GENERATOR = { 0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3 };
+        
         /// <summary>
         /// Encodes data with a human-readable prefix using Bech32 encoding
         /// </summary>
@@ -25,8 +33,28 @@ namespace Nostr.Unity.Utils
             if (data == null || data.Length == 0)
                 throw new ArgumentException("Data cannot be null or empty", nameof(data));
             
-            var encoder = new Bech32Encoder(hrp);
-            return encoder.Encode(data);
+            // Convert data to 5-bit values
+            byte[] converted = ConvertBits(data, 8, 5, true);
+            
+            // Create checksum
+            byte[] checksum = CreateChecksum(hrp, converted);
+            
+            // Build the encoded string
+            StringBuilder sb = new StringBuilder(hrp.Length + 1 + converted.Length + checksum.Length);
+            sb.Append(hrp);
+            sb.Append(SEPARATOR);
+            
+            foreach (var b in converted)
+            {
+                sb.Append(CHARSET[b]);
+            }
+            
+            foreach (var b in checksum)
+            {
+                sb.Append(CHARSET[b]);
+            }
+            
+            return sb.ToString();
         }
         
         /// <summary>
@@ -39,23 +67,49 @@ namespace Nostr.Unity.Utils
             if (string.IsNullOrEmpty(bech32Str))
                 throw new ArgumentException("Bech32 string cannot be null or empty", nameof(bech32Str));
             
-            // NBitcoin requires 1 separator
-            int separatorPos = bech32Str.LastIndexOf('1');
+            // Verify case is not mixed
+            if (bech32Str.ToLower() != bech32Str && bech32Str.ToUpper() != bech32Str)
+                throw new FormatException("Mixed case strings are not valid Bech32");
+            
+            // Normalize to lowercase
+            bech32Str = bech32Str.ToLower();
+            
+            // Find the separator
+            int separatorPos = bech32Str.LastIndexOf(SEPARATOR);
             if (separatorPos < 1)
                 throw new FormatException("Bech32 string missing separator");
             
+            // Extract HRP and data
             string hrp = bech32Str.Substring(0, separatorPos);
-            var encoder = new Bech32Encoder(hrp);
+            string encodedData = bech32Str.Substring(separatorPos + 1);
             
-            try
+            // Validate characters
+            foreach (char c in encodedData)
             {
-                var decoded = encoder.Decode(bech32Str, out _);
-                return (hrp, decoded);
+                if (CHARSET.IndexOf(c) == -1)
+                    throw new FormatException($"Invalid character in Bech32 string: {c}");
             }
-            catch (Exception ex)
+            
+            // Convert the data part from the charset to bytes
+            byte[] data = new byte[encodedData.Length];
+            for (int i = 0; i < encodedData.Length; i++)
             {
-                throw new FormatException($"Invalid Bech32 string: {ex.Message}");
+                data[i] = (byte)CHARSET.IndexOf(encodedData[i]);
             }
+            
+            // Verify the checksum
+            if (!VerifyChecksum(hrp, data))
+                throw new FormatException("Invalid Bech32 checksum");
+            
+            // Return the decoded data (minus the 6 checksum bytes)
+            int dataLength = data.Length - 6;
+            byte[] decodedData = new byte[dataLength];
+            Array.Copy(data, decodedData, dataLength);
+            
+            // Convert back from 5-bit to 8-bit
+            byte[] result = ConvertBits(decodedData, 5, 8, false);
+            
+            return (hrp, result);
         }
         
         /// <summary>
@@ -141,6 +195,123 @@ namespace Nostr.Unity.Utils
             {
                 throw new Exception($"Error converting bytes to hex: {ex.Message}", ex);
             }
+        }
+        
+        /// <summary>
+        /// Converts from one bit size to another, maintaining data size
+        /// </summary>
+        private static byte[] ConvertBits(byte[] data, int fromBits, int toBits, bool pad)
+        {
+            int acc = 0;
+            int bits = 0;
+            List<byte> result = new List<byte>();
+            int maxv = (1 << toBits) - 1;
+            
+            foreach (var value in data)
+            {
+                if ((value >> fromBits) > 0)
+                    throw new FormatException($"Invalid value: {value}");
+                
+                acc = (acc << fromBits) | value;
+                bits += fromBits;
+                
+                while (bits >= toBits)
+                {
+                    bits -= toBits;
+                    result.Add((byte)((acc >> bits) & maxv));
+                }
+            }
+            
+            if (pad)
+            {
+                if (bits > 0)
+                {
+                    result.Add((byte)((acc << (toBits - bits)) & maxv));
+                }
+            }
+            else if (bits >= fromBits || ((acc << (toBits - bits)) & maxv) != 0)
+            {
+                throw new FormatException("Invalid padding in data");
+            }
+            
+            return result.ToArray();
+        }
+        
+        /// <summary>
+        /// Calculate the Bech32 checksum
+        /// </summary>
+        private static byte[] CreateChecksum(string hrp, byte[] data)
+        {
+            byte[] hrpExpanded = HrpExpand(hrp);
+            byte[] values = new byte[hrpExpanded.Length + data.Length + 6];
+            
+            Array.Copy(hrpExpanded, 0, values, 0, hrpExpanded.Length);
+            Array.Copy(data, 0, values, hrpExpanded.Length, data.Length);
+            
+            uint polymod = Polymod(values) ^ 1;
+            byte[] checksum = new byte[6];
+            
+            for (int i = 0; i < 6; i++)
+            {
+                checksum[i] = (byte)((polymod >> (5 * (5 - i))) & 31);
+            }
+            
+            return checksum;
+        }
+        
+        /// <summary>
+        /// Verify the Bech32 checksum
+        /// </summary>
+        private static bool VerifyChecksum(string hrp, byte[] data)
+        {
+            byte[] hrpExpanded = HrpExpand(hrp);
+            byte[] values = new byte[hrpExpanded.Length + data.Length];
+            
+            Array.Copy(hrpExpanded, 0, values, 0, hrpExpanded.Length);
+            Array.Copy(data, 0, values, hrpExpanded.Length, data.Length);
+            
+            return Polymod(values) == 1;
+        }
+        
+        /// <summary>
+        /// Expand the human-readable prefix for checksum computation
+        /// </summary>
+        private static byte[] HrpExpand(string hrp)
+        {
+            byte[] result = new byte[hrp.Length * 2 + 1];
+            
+            for (int i = 0; i < hrp.Length; i++)
+            {
+                result[i] = (byte)(hrp[i] >> 5);
+                result[i + hrp.Length + 1] = (byte)(hrp[i] & 31);
+            }
+            
+            result[hrp.Length] = 0;
+            return result;
+        }
+        
+        /// <summary>
+        /// Calculate Bech32 checksum
+        /// </summary>
+        private static uint Polymod(byte[] values)
+        {
+            uint chk = 1;
+            
+            foreach (var value in values)
+            {
+                uint b = (chk >> 25);
+                chk = ((chk & 0x1ffffff) << 5) ^ value;
+                
+                for (int i = 0; i < 5; i++)
+                {
+                    if (((b >> i) & 1) == 1)
+                    {
+                        chk ^= GENERATOR[i];
+                    }
+                }
+            }
+            
+            return chk;
         }
     }
 } 

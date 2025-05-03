@@ -129,8 +129,7 @@ namespace Nostr.Unity.Tests
         {
             Debug.Log("Testing relay connection...");
             bool connected = false;
-            bool published = false;
-            Exception caughtException = null;
+            
             // Connect to a test relay
             yield return _client.ConnectToRelay("wss://relay.damus.io", result => connected = result);
             if (!connected)
@@ -138,25 +137,32 @@ namespace Nostr.Unity.Tests
                 Debug.LogError("Failed to connect to relay");
                 yield break;
             }
-            try
+            
+            // Create a test event
+            string privateKey = _keyManager.GeneratePrivateKey();
+            string publicKey = _keyManager.GetPublicKey(privateKey);
+            var nostrEvent = new NostrEvent(publicKey, (int)NostrEventKind.TextNote, "Test message from Unity SDK");
+            nostrEvent.Sign(privateKey);
+            
+            bool publishComplete = false;
+            bool published = false;
+            
+            // Use a callback-based approach to run outside try/catch
+            Action<bool> publishCallback = (result) => {
+                published = result;
+                publishComplete = true;
+            };
+            
+            // Start publishing the event
+            StartCoroutine(PublishEventAndHandleResult(nostrEvent, publishCallback));
+            
+            // Wait for publish to complete
+            while (!publishComplete)
             {
-                // Create a test event
-                string privateKey = _keyManager.GeneratePrivateKey();
-                string publicKey = _keyManager.GetPublicKey(privateKey);
-                var nostrEvent = new NostrEvent(publicKey, (int)NostrEventKind.TextNote, "Test message from Unity SDK");
-                nostrEvent.Sign(privateKey);
-                // Publish the event
-                yield return _client.PublishEvent(nostrEvent, result => published = result);
+                yield return null;
             }
-            catch (Exception ex)
-            {
-                caughtException = ex;
-            }
-            if (caughtException != null)
-            {
-                Debug.LogError($"Relay test failed: {caughtException.Message}");
-                yield break;
-            }
+            
+            // Check the result
             if (published)
             {
                 Debug.Log("Event published successfully!");
@@ -164,6 +170,19 @@ namespace Nostr.Unity.Tests
             else
             {
                 Debug.LogError("Failed to publish event");
+            }
+        }
+        
+        private IEnumerator PublishEventAndHandleResult(NostrEvent nostrEvent, Action<bool> callback)
+        {
+            try
+            {
+                yield return _client.PublishEvent(nostrEvent, callback);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Relay test failed: {ex.Message}");
+                callback(false);
             }
         }
     }

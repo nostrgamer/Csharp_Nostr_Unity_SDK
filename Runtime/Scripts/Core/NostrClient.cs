@@ -248,6 +248,9 @@ namespace Nostr.Unity
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 bool shouldReconnect = false;
+                bool hasError = false;
+                
+                // Check websocket state
                 try
                 {
                     if (webSocket.State != WebSocketState.Open)
@@ -267,44 +270,90 @@ namespace Nostr.Unity
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error checking WebSocket state: {ex.Message}");
+                    hasError = true;
+                }
+                
+                if (hasError)
+                {
                     yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
                     continue;
                 }
+                
+                // Handle reconnection
                 if (shouldReconnect)
                 {
                     yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
                     Task reconnectTask = null;
+                    bool reconnectStarted = false;
+                    
                     try
                     {
                         reconnectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                        reconnectStarted = true;
                     }
                     catch (Exception ex)
                     {
                         Debug.LogError($"Error starting reconnect: {ex.Message}");
+                    }
+                    
+                    if (!reconnectStarted)
+                    {
                         continue;
                     }
+                    
                     yield return reconnectTask.AsCoroutine();
                     reconnectAttempts = 0;
                     Debug.Log($"Reconnected to relay: {relayUrl}");
                 }
-                Task receiveTask = null;
+                
+                // Try to receive messages
+                Task<WebSocketReceiveResult> receiveTask = null;
+                bool receiveStarted = false;
+                
                 try
                 {
                     receiveTask = webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
+                    receiveStarted = true;
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error starting receive: {ex.Message}");
+                }
+                
+                if (!receiveStarted)
+                {
                     yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
                     continue;
                 }
+                
                 yield return receiveTask.AsCoroutine();
-                var result = receiveTask.Result;
+                
+                // Access the result safely after task completes
+                WebSocketReceiveResult result = null;
+                bool resultObtained = false;
+                
+                try 
+                {
+                    result = receiveTask.GetAwaiter().GetResult();
+                    resultObtained = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error getting WebSocket result: {ex.Message}");
+                }
+                
+                if (!resultObtained)
+                {
+                    yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
+                    continue;
+                }
+                
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
                     Debug.Log($"Received close message from {relayUrl}");
                     break;
                 }
+                
                 string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 HandleMessage(message, relayUrl);
             }

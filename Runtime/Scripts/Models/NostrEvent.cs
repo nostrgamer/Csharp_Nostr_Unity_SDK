@@ -128,7 +128,7 @@ namespace Nostr.Unity
             using (var sha256 = SHA256.Create())
             {
                 byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(serializedEvent));
-                return Bech32.BytesToHex(hash);
+                return Bech32Util.BytesToHex(hash);
             }
         }
         
