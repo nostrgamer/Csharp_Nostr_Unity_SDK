@@ -51,6 +51,9 @@ namespace Nostr.Unity
                 
                 _connections[relayUrl] = new object(); // Placeholder for WebSocket connection
                 Connected?.Invoke(this, relayUrl);
+                
+                // Start a background task to simulate receiving messages
+                SimulateReceiveMessages(relayUrl);
             }
             catch (Exception ex)
             {
@@ -151,6 +154,35 @@ namespace Nostr.Unity
             if (exceptions.Count > 0)
             {
                 throw new AggregateException("Failed to send message to some relays", exceptions);
+            }
+        }
+
+        /// <summary>
+        /// Simulates receiving messages from a relay
+        /// </summary>
+        /// <param name="relayUrl">The relay URL</param>
+        private async void SimulateReceiveMessages(string relayUrl)
+        {
+            // This is a placeholder - in a real implementation, this would be a WebSocket receive loop
+            try
+            {
+                while (_connections.ContainsKey(relayUrl))
+                {
+                    // Simulate random time between messages
+                    await Task.Delay(UnityEngine.Random.Range(2000, 5000));
+                    
+                    if (!_connections.ContainsKey(relayUrl))
+                        break;
+                    
+                    // Simulate received message
+                    string mockMessage = $"{{\"type\":\"EVENT\",\"content\":\"This is a test message at {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")}\"}}";
+                    MessageReceived?.Invoke(this, mockMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error in message receive simulation for {relayUrl}: {ex.Message}");
+                Error?.Invoke(this, $"Error receiving messages: {ex.Message}");
             }
         }
     }

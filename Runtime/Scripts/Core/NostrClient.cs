@@ -112,10 +112,12 @@ namespace Nostr.Unity
                 _webSockets.Add(ws);
                 _relayUrls.Add(relayUrl);
                 StartCoroutine(ReceiveMessagesCoroutine(ws, relayUrl));
+                Connected?.Invoke(this, relayUrl);
             }
             else if (connectionError != null)
             {
                 Debug.LogError($"Error connecting to relay {relayUrl}: {connectionError.Message}");
+                Error?.Invoke(this, $"Error connecting to relay {relayUrl}: {connectionError.Message}");
             }
             onComplete?.Invoke(connected);
         }
@@ -128,6 +130,9 @@ namespace Nostr.Unity
         public IEnumerator Disconnect(Action onComplete = null)
         {
             _cancellationTokenSource.Cancel();
+            
+            List<string> disconnectedRelays = new List<string>(_relayUrls);
+            
             foreach (var ws in _webSockets)
             {
                 Task closeTask = null;
@@ -141,6 +146,7 @@ namespace Nostr.Unity
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error closing WebSocket: {ex.Message}");
+                    Error?.Invoke(this, $"Error disconnecting: {ex.Message}");
                 }
                 if (closeTask != null)
                 {
@@ -150,6 +156,13 @@ namespace Nostr.Unity
                     }
                 }
             }
+            
+            // Notify disconnection for each relay
+            foreach (var relayUrl in disconnectedRelays)
+            {
+                Disconnected?.Invoke(this, relayUrl);
+            }
+            
             _webSockets.Clear();
             _relayUrls.Clear();
             _subscriptions.Clear();
@@ -165,7 +178,7 @@ namespace Nostr.Unity
         public IEnumerator PublishEvent(NostrEvent nostrEvent, Action<bool> onComplete = null)
         {
             bool success = false;
-            Exception error = null;
+            
             // Validate input outside try-catch
             if (nostrEvent == null)
                 throw new ArgumentNullException(nameof(nostrEvent));
@@ -189,6 +202,7 @@ namespace Nostr.Unity
                     catch (Exception ex)
                     {
                         Debug.LogError($"Failed to start sending event to relay: {ex.Message}");
+                        Error?.Invoke(this, $"Failed to send event: {ex.Message}");
                         continue;
                     }
                     yield return sendTask.AsCoroutine();
@@ -433,6 +447,9 @@ namespace Nostr.Unity
                     return;
                 }
                 
+                // Trigger the EventReceived event
+                EventReceived?.Invoke(this, new NostrEventArgs(nostrEvent, subscriptionId, relayUrl));
+                
                 foreach (var callback in callbacks)
                 {
                     try
@@ -442,12 +459,14 @@ namespace Nostr.Unity
                     catch (Exception ex)
                     {
                         Debug.LogError($"Error in event callback: {ex.Message}");
+                        Error?.Invoke(this, $"Error in event callback: {ex.Message}");
                     }
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error handling EVENT message from {relayUrl}: {ex.Message}");
+                Error?.Invoke(this, $"Error handling EVENT message: {ex.Message}");
             }
         }
         
