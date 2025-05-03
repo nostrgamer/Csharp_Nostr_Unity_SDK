@@ -38,7 +38,7 @@ namespace Nostr.Unity.Utils
                 
             try
             {
-                (string prefix, _) = Bech32.DecodeToHex(key);
+                (string prefix, _) = Bech32Util.DecodeToHex(key);
                 return prefix == NostrConstants.NPUB_PREFIX;
             }
             catch
@@ -62,7 +62,7 @@ namespace Nostr.Unity.Utils
                 
             try
             {
-                (string prefix, _) = Bech32.DecodeToHex(key);
+                (string prefix, _) = Bech32Util.DecodeToHex(key);
                 return prefix == NostrConstants.NSEC_PREFIX;
             }
             catch
@@ -90,7 +90,7 @@ namespace Nostr.Unity.Utils
             {
                 try
                 {
-                    (_, string hexData) = Bech32.DecodeToHex(key);
+                    (_, string hexData) = Bech32Util.DecodeToHex(key);
                     return hexData;
                 }
                 catch (Exception ex)
@@ -118,13 +118,13 @@ namespace Nostr.Unity.Utils
                 
             // Convert from hex to npub
             if (IsValidHexKey(hexKey))
-                return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, hexKey);
+                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hexKey);
                 
             // Try to convert from nsec
             if (IsValidNsec(hexKey))
             {
                 string hex = ToHex(hexKey);
-                return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, hex);
+                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hex);
             }
             
             throw new ArgumentException("Invalid key format", nameof(hexKey));
@@ -146,7 +146,7 @@ namespace Nostr.Unity.Utils
                 
             // Convert from hex to nsec
             if (IsValidHexKey(hexKey))
-                return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
+                return Bech32Util.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
                 
             throw new ArgumentException("Invalid key format", nameof(hexKey));
         }

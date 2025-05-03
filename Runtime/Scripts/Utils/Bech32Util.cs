@@ -9,7 +9,7 @@ namespace Nostr.Unity.Utils
     /// <summary>
     /// Utility class for Bech32 encoding and decoding using NBitcoin's implementation.
     /// </summary>
-    public static class Bech32
+    public static class Bech32Util
     {
         /// <summary>
         /// Encodes data with a human-readable prefix using Bech32 encoding

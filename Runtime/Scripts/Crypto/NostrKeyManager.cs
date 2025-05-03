@@ -35,11 +35,11 @@ namespace Nostr.Unity
                 
                 if (useHex)
                 {
-                    return Bech32.BytesToHex(privateKey);
+                    return Bech32Util.BytesToHex(privateKey);
                 }
                 else
                 {
-                    return Bech32.Encode(NostrConstants.NSEC_PREFIX, privateKey);
+                    return Bech32Util.Encode(NostrConstants.NSEC_PREFIX, privateKey);
                 }
             }
             catch (Exception ex)
@@ -69,7 +69,7 @@ namespace Nostr.Unity
                 {
                     try
                     {
-                        (string prefix, string data) = Bech32.DecodeToHex(privateKey);
+                        (string prefix, string data) = Bech32Util.DecodeToHex(privateKey);
                         if (prefix != NostrConstants.NSEC_PREFIX)
                         {
                             throw new ArgumentException("Invalid nsec prefix");
@@ -84,16 +84,16 @@ namespace Nostr.Unity
                 }
                 
                 // Use Secp256k1Manager to derive the public key
-                byte[] privateKeyBytes = Bech32.HexToBytes(hexPrivateKey);
+                byte[] privateKeyBytes = Bech32Util.HexToBytes(hexPrivateKey);
                 byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
                 
                 if (useHex)
                 {
-                    return Bech32.BytesToHex(publicKeyBytes);
+                    return Bech32Util.BytesToHex(publicKeyBytes);
                 }
                 else
                 {
-                    return Bech32.Encode(NostrConstants.NPUB_PREFIX, publicKeyBytes);
+                    return Bech32Util.Encode(NostrConstants.NPUB_PREFIX, publicKeyBytes);
                 }
             }
             catch (Exception ex)
@@ -126,7 +126,7 @@ namespace Nostr.Unity
                 {
                     try
                     {
-                        (string prefix, string data) = Bech32.DecodeToHex(privateKey);
+                        (string prefix, string data) = Bech32Util.DecodeToHex(privateKey);
                         if (prefix != NostrConstants.NSEC_PREFIX)
                         {
                             throw new ArgumentException("Invalid nsec prefix");
@@ -147,13 +147,13 @@ namespace Nostr.Unity
                 byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
                 
                 // Convert the private key to bytes
-                byte[] privateKeyBytes = Bech32.HexToBytes(hexPrivateKey);
+                byte[] privateKeyBytes = Bech32Util.HexToBytes(hexPrivateKey);
                 
                 // Generate the signature
                 byte[] signatureBytes = Secp256k1Manager.Sign(messageHash, privateKeyBytes);
                 
                 // Convert to hex
-                return Bech32.BytesToHex(signatureBytes);
+                return Bech32Util.BytesToHex(signatureBytes);
             }
             catch (Exception ex)
             {
@@ -189,7 +189,7 @@ namespace Nostr.Unity
                 {
                     try
                     {
-                        (string prefix, string data) = Bech32.DecodeToHex(publicKey);
+                        (string prefix, string data) = Bech32Util.DecodeToHex(publicKey);
                         if (prefix != NostrConstants.NPUB_PREFIX)
                         {
                             throw new ArgumentException("Invalid npub prefix");
@@ -207,10 +207,10 @@ namespace Nostr.Unity
                 byte[] messageHash = Secp256k1Manager.ComputeMessageHash(message);
                 
                 // Convert the signature to bytes
-                byte[] signatureBytes = Bech32.HexToBytes(signature);
+                byte[] signatureBytes = Bech32Util.HexToBytes(signature);
                 
                 // Convert the public key to bytes
-                byte[] publicKeyBytes = Bech32.HexToBytes(hexPublicKey);
+                byte[] publicKeyBytes = Bech32Util.HexToBytes(hexPublicKey);
                 
                 // Verify the signature
                 return Secp256k1Manager.Verify(messageHash, signatureBytes, publicKeyBytes);
@@ -320,7 +320,7 @@ namespace Nostr.Unity
                 
                 if (useBech32)
                 {
-                    return Bech32.EncodeHex(NostrConstants.NSEC_PREFIX, privateKey);
+                    return Bech32Util.EncodeHex(NostrConstants.NSEC_PREFIX, privateKey);
                 }
                 
                 return privateKey;
@@ -353,7 +353,7 @@ namespace Nostr.Unity
                 
                 if (useBech32)
                 {
-                    return Bech32.EncodeHex(NostrConstants.NPUB_PREFIX, publicKey);
+                    return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, publicKey);
                 }
                 
                 return publicKey;
