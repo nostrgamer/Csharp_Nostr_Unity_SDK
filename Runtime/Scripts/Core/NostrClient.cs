@@ -398,6 +398,9 @@ namespace Nostr.Unity
                     case "NOTICE":
                         HandleNoticeMessage(messageArray, relayUrl);
                         break;
+                    case "OK":
+                        HandleOkMessage(messageArray, relayUrl);
+                        break;
                     default:
                         Debug.LogWarning($"Unknown message type from {relayUrl}: {messageType}");
                         break;
@@ -517,6 +520,56 @@ namespace Nostr.Unity
             catch (Exception ex)
             {
                 Debug.LogError($"Error handling NOTICE message from {relayUrl}: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Handles OK messages received from relays (event publish confirmations)
+        /// </summary>
+        /// <param name="messageArray">The message array from the relay</param>
+        /// <param name="relayUrl">The URL of the relay that sent the message</param>
+        private void HandleOkMessage(object[] messageArray, string relayUrl)
+        {
+            try
+            {
+                if (messageArray.Length < 3)
+                {
+                    Debug.LogWarning($"Invalid OK message format from {relayUrl}");
+                    return;
+                }
+                
+                string eventId = messageArray[1]?.ToString();
+                bool accepted = false;
+                
+                // The third element is a boolean indicating if the event was accepted
+                if (messageArray[2] != null)
+                {
+                    // Convert to bool - could be a bool or a string "true"/"false"
+                    if (messageArray[2] is bool boolValue)
+                    {
+                        accepted = boolValue;
+                    }
+                    else
+                    {
+                        bool.TryParse(messageArray[2].ToString(), out accepted);
+                    }
+                }
+                
+                string message = accepted ? 
+                    $"Event {eventId} was accepted by {relayUrl}" : 
+                    $"Event {eventId} was rejected by {relayUrl}";
+                
+                if (messageArray.Length >= 4 && messageArray[3] != null)
+                {
+                    // The fourth element is an optional message
+                    message += $": {messageArray[3]}";
+                }
+                
+                Debug.Log(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error handling OK message from {relayUrl}: {ex.Message}");
             }
         }
         

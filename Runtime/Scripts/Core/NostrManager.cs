@@ -44,14 +44,20 @@ namespace Nostr.Unity
         public NostrKeyManager KeyManager => _keyManager;
         
         /// <summary>
-        /// Gets or sets the current user's private key
+        /// Gets or sets the current user's private key in hex format
         /// </summary>
         public string PrivateKey { get; private set; }
         
         /// <summary>
-        /// Gets the current user's public key
+        /// Gets the current user's public key in hex format (without compression prefix)
         /// </summary>
         public string PublicKey { get; private set; }
+        
+        /// <summary>
+        /// Gets the current user's public key in compressed hex format (with compression prefix)
+        /// This is needed for signature verification
+        /// </summary>
+        public string CompressedPublicKey { get; private set; }
         
         /// <summary>
         /// Gets the current user's private key in Bech32 format (nsec)
@@ -67,6 +73,23 @@ namespace Nostr.Unity
         /// Gets a shortened version of the public key for display purposes
         /// </summary>
         public string ShortPublicKey => useBech32Format ? PublicKeyBech32?.ToShortKey() : PublicKey?.ToShortKey();
+        
+        /// <summary>
+        /// Returns the current key information as a formatted string
+        /// </summary>
+        /// <returns>A string containing nsec and npub information</returns>
+        public string GetKeyInfo()
+        {
+            if (string.IsNullOrEmpty(PrivateKey) || string.IsNullOrEmpty(PublicKey))
+            {
+                return "No keys currently loaded.";
+            }
+
+            string nsec = PrivateKeyBech32;
+            string npub = PublicKeyBech32;
+            
+            return $"Private Key (nsec): {nsec}\nPublic Key (npub): {npub}";
+        }
         
         private void Awake()
         {
@@ -183,21 +206,28 @@ namespace Nostr.Unity
                 if (!string.IsNullOrEmpty(PrivateKey))
                 {
                     // Get public key in hex format
-                    PublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                    string fullPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
                     
                     // Ensure the public key is valid before trying to convert to Bech32
-                    if (!IsValidHexString(PublicKey) || (PublicKey.Length != 64 && PublicKey.Length != 66))
+                    if (!IsValidHexString(fullPublicKey) || (fullPublicKey.Length != 64 && fullPublicKey.Length != 66))
                     {
-                        Debug.LogError($"Invalid public key format: {PublicKey}");
+                        Debug.LogError($"Invalid public key format: {fullPublicKey}");
                         return;
                     }
                     
+                    // Store the compressed public key format for signature verification
+                    CompressedPublicKey = fullPublicKey;
+                    
                     // If we have a compressed key (66 chars with 02 or 03 prefix), convert for bech32
-                    if (PublicKey.Length == 66 && (PublicKey.StartsWith("02") || PublicKey.StartsWith("03")))
+                    if (fullPublicKey.Length == 66 && (fullPublicKey.StartsWith("02") || fullPublicKey.StartsWith("03")))
                     {
-                        // Remove compression prefix for bech32 encoding
-                        PublicKey = PublicKey.Substring(2);
+                        // Remove compression prefix for bech32 encoding but keep original for verification
+                        PublicKey = fullPublicKey.Substring(2);
                         Debug.Log($"Converted compressed public key to format for bech32 encoding: {PublicKey}");
+                    }
+                    else
+                    {
+                        PublicKey = fullPublicKey;
                     }
                     
                     // Log the key in appropriate format
@@ -267,14 +297,38 @@ namespace Nostr.Unity
                 
                 try
                 {
-                    PublicKey = _keyManager.GetPublicKey(hexPrivateKey, true);
+                    string fullPublicKey = _keyManager.GetPublicKey(hexPrivateKey, true);
+                    
+                    // Store the compressed public key format for signature verification
+                    CompressedPublicKey = fullPublicKey;
+                    
+                    // If we have a compressed key (66 chars with 02 or 03 prefix), convert for bech32
+                    if (fullPublicKey.Length == 66 && (fullPublicKey.StartsWith("02") || fullPublicKey.StartsWith("03")))
+                    {
+                        // Remove compression prefix for bech32 encoding but keep original for verification
+                        PublicKey = fullPublicKey.Substring(2);
+                    }
+                    else
+                    {
+                        PublicKey = fullPublicKey;
+                    }
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error deriving public key: {ex.Message}");
                     // Generate new key pair as fallback
                     PrivateKey = _keyManager.GeneratePrivateKey(true);
-                    PublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                    CompressedPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                    
+                    // Process for PublicKey
+                    if (CompressedPublicKey.Length == 66 && (CompressedPublicKey.StartsWith("02") || CompressedPublicKey.StartsWith("03")))
+                    {
+                        PublicKey = CompressedPublicKey.Substring(2);
+                    }
+                    else
+                    {
+                        PublicKey = CompressedPublicKey;
+                    }
                 }
                 
                 if (save)
@@ -357,6 +411,14 @@ namespace Nostr.Unity
                 return;
             }
             
+            // Use the uncompressed PublicKey (without the 02/03 prefix)
+            // Nostr relays expect a 32-byte hex string (64 characters)
+            if (string.IsNullOrEmpty(PublicKey) || PublicKey.Length != 64)
+            {
+                Debug.LogError($"Public key is not in the required format. Expected 64 hex chars, got: {PublicKey}");
+                return;
+            }
+            
             var nostrEvent = new NostrEvent(PublicKey, (int)NostrEventKind.TextNote, content, Array.Empty<string[]>());
             nostrEvent.Sign(PrivateKey);
             
@@ -376,6 +438,31 @@ namespace Nostr.Unity
             {
                 Debug.LogError("Failed to publish note");
             }
+        }
+        
+        /// <summary>
+        /// Sends a test message to the connected relays
+        /// </summary>
+        /// <param name="customMessage">Optional custom message. If not provided, a default test message will be used.</param>
+        /// <returns>True if the message was sent successfully</returns>
+        public bool SendTestMessage(string customMessage = null)
+        {
+            if (string.IsNullOrEmpty(PrivateKey))
+            {
+                Debug.LogError("Private key not set. Cannot send test message.");
+                return false;
+            }
+
+            // Use the provided message or a default one
+            string content = customMessage ?? $"Hello from Unity Nostr SDK! Test message sent at: {DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss UTC")}";
+            
+            // Send the message
+            Debug.Log($"Sending test message: \"{content}\"");
+            PostTextNote(content);
+            
+            // In a real application, you'd want to use a callback to know if the message was actually sent
+            // This just returns true if we attempted to send
+            return true;
         }
         
         private void OnDestroy()

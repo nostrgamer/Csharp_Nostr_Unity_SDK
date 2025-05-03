@@ -156,6 +156,59 @@ The NostrManager component automatically:
 4. Handles event signing
 5. Provides a simple API for common operations
 
+### Testing Your Connection
+
+Once you have the SDK set up, you can test your connection by sending a test message:
+
+#### Method 1: Using Code
+
+Simply call the `SendTestMessage` method on your NostrManager instance:
+
+```csharp
+// Reference to the NostrManager
+private NostrManager nostrManager;
+
+// In your Start or another method
+void SendTest()
+{
+    if (nostrManager != null)
+    {
+        // Send with default test message
+        nostrManager.SendTestMessage();
+        
+        // Or with custom message
+        nostrManager.SendTestMessage("My custom test message from Unity!");
+    }
+}
+```
+
+#### Method 2: Using the TestMessageSender Component
+
+For a quick UI-based test:
+
+1. Create a new UI Button in your scene
+2. Create a GameObject and attach the `TestMessageSender` script to it
+3. In the Inspector, assign your NostrManager to the script
+4. (Optional) Add a UI InputField for custom messages
+5. Assign the Button to the `sendButton` field
+6. Press Play and click the button to send a test message
+
+You can then check your test message on a web-based Nostr client like [Coracle](https://coracle.social) or [Primal](https://primal.net) by searching for your public key.
+
+#### Method 3: Using the Unity Editor (Easiest)
+
+The SDK includes a custom editor extension for NostrManager that adds testing tools right in the Inspector:
+
+1. Select your NostrManager GameObject in the Hierarchy
+2. Enter Play mode
+3. Scroll down to the "Test Tools" section in the Inspector
+4. Type your test message (or use the default)
+5. Click the "Send Test Message" button
+
+The custom editor also shows you the current connection status and lists all connected relays.
+
+You can then check your test message on a web-based Nostr client like [Coracle](https://coracle.social) or [Primal](https://primal.net) by searching for your public key.
+
 ### Manual Key Management (If Needed)
 
 If you need direct access to the key management functionality, you can use:
