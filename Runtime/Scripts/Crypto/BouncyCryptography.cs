@@ -8,6 +8,7 @@ using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
 using Nostr.Unity.Crypto.Recovery;
+using BCECPoint = Org.BouncyCastle.Math.EC.ECPoint;
 
 namespace Nostr.Unity
 {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using Nostr.Unity.Utils;
+using System.Collections;
 
 namespace Nostr.Unity
 {
@@ -244,17 +245,26 @@ namespace Nostr.Unity
         /// <summary>
         /// Connects to the default relays
         /// </summary>
-        public async void ConnectToRelays()
+        public void ConnectToRelays()
         {
-            try
+            StartCoroutine(ConnectToRelaysCoroutine());
+        }
+        
+        private IEnumerator ConnectToRelaysCoroutine()
+        {
+            foreach (var relayUrl in defaultRelays)
             {
-                Debug.Log($"Connecting to {defaultRelays.Count} relays...");
-                await _nostrClient.ConnectToRelays(defaultRelays);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error connecting to relays: {ex.Message}");
-                OnError?.Invoke($"Error connecting to relays: {ex.Message}");
+                bool connected = false;
+                yield return _nostrClient.ConnectToRelay(relayUrl, result => connected = result);
+                
+                if (connected)
+                {
+                    Debug.Log($"Connected to relay: {relayUrl}");
+                }
+                else
+                {
+                    Debug.LogError($"Failed to connect to relay: {relayUrl}");
+                }
             }
         }
         
@@ -262,25 +272,32 @@ namespace Nostr.Unity
         /// Posts a text note to connected relays
         /// </summary>
         /// <param name="content">The content of the note</param>
-        public async void PostTextNote(string content)
+        public void PostTextNote(string content)
         {
-            try
+            if (string.IsNullOrEmpty(PrivateKey))
             {
-                if (string.IsNullOrEmpty(PrivateKey))
-                {
-                    throw new InvalidOperationException("Private key not set. Cannot sign event.");
-                }
-                
-                var nostrEvent = new NostrEvent(PublicKey, (int)NostrEventKind.TextNote, content, Array.Empty<string[]>());
-                nostrEvent.Sign(PrivateKey);
-                
-                Debug.Log($"Posting note: {content}");
-                await _nostrClient.PublishEvent(nostrEvent);
+                Debug.LogError("Private key not set. Cannot sign event.");
+                return;
             }
-            catch (Exception ex)
+            
+            var nostrEvent = new NostrEvent(PublicKey, (int)NostrEventKind.TextNote, content, Array.Empty<string[]>());
+            nostrEvent.Sign(PrivateKey);
+            
+            StartCoroutine(PostTextNoteCoroutine(nostrEvent));
+        }
+        
+        private IEnumerator PostTextNoteCoroutine(NostrEvent nostrEvent)
+        {
+            bool published = false;
+            yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
+            
+            if (published)
             {
-                Debug.LogError($"Error posting note: {ex.Message}");
-                OnError?.Invoke($"Error posting note: {ex.Message}");
+                Debug.Log("Note published successfully");
+            }
+            else
+            {
+                Debug.LogError("Failed to publish note");
             }
         }
         

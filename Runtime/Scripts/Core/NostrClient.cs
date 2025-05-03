@@ -70,57 +70,55 @@ namespace Nostr.Unity
         /// <returns>True if the connection was successful</returns>
         public IEnumerator ConnectToRelay(string relayUrl, Action<bool> onComplete = null)
         {
-            bool result = false;
-            Exception error = null;
-            ClientWebSocket webSocket = null;
-            Task connectTask = null;
-            // Validate input outside try-catch
             if (string.IsNullOrEmpty(relayUrl))
-                throw new ArgumentException("Relay URL cannot be null or empty", nameof(relayUrl));
-            if (!relayUrl.StartsWith("wss://") && !relayUrl.StartsWith("ws://"))
-                throw new ArgumentException("Relay URL must start with wss:// or ws://", nameof(relayUrl));
-            try
             {
-                webSocket = new ClientWebSocket();
-                connectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Failed to start connection to relay {relayUrl}: {ex.Message}");
-                onComplete?.Invoke(false);
-                yield break;
-            }
-            // Add timeout
-            float timeout = 10f;
-            while (!connectTask.IsCompleted && timeout > 0)
-            {
-                timeout -= Time.deltaTime;
-                yield return null;
-            }
-            if (timeout <= 0)
-            {
-                Debug.LogError($"Connection to relay {relayUrl} timed out");
                 onComplete?.Invoke(false);
                 yield break;
             }
             
-            Task yieldTask = connectTask;
-            yield return new WaitUntil(() => yieldTask.IsCompleted);
+            if (_webSockets.ContainsKey(relayUrl))
+            {
+                onComplete?.Invoke(true);
+                yield break;
+            }
+            
+            bool connected = false;
+            Exception connectionError = null;
             
             try
             {
-                _webSockets.Add(webSocket);
+                var ws = new WebSocket(relayUrl);
+                _webSockets[relayUrl] = ws;
                 _relayUrls.Add(relayUrl);
-                StartCoroutine(ReceiveMessagesCoroutine(webSocket, relayUrl));
-                Debug.Log($"Connected to relay: {relayUrl}");
-                result = true;
+                
+                var connectTask = ws.Connect();
+                while (!connectTask.IsCompleted)
+                {
+                    yield return null;
+                }
+                
+                if (connectTask.IsFaulted)
+                {
+                    connectionError = connectTask.Exception;
+                }
+                else
+                {
+                    connected = true;
+                }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Failed to connect to relay {relayUrl}: {ex.Message}");
-                result = false;
+                connectionError = ex;
             }
-            onComplete?.Invoke(result);
+            
+            if (connectionError != null)
+            {
+                Debug.LogError($"Error connecting to relay {relayUrl}: {connectionError.Message}");
+                _webSockets.Remove(relayUrl);
+                _relayUrls.Remove(relayUrl);
+            }
+            
+            onComplete?.Invoke(connected);
         }
         
         /// <summary>
@@ -132,24 +130,19 @@ namespace Nostr.Unity
         {
             _cancellationTokenSource.Cancel();
             
-            foreach (var webSocket in _webSockets)
+            foreach (var ws in _webSockets)
             {
-                Task closeTask = null;
                 try
                 {
-                    if (webSocket.State == WebSocketState.Open)
+                    var closeTask = ws.Close();
+                    while (!closeTask.IsCompleted)
                     {
-                        closeTask = webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+                        yield return null;
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error closing WebSocket: {ex.Message}");
-                }
-                
-                if (closeTask != null)
-                {
-                    yield return new WaitUntil(() => closeTask.IsCompleted);
                 }
             }
             

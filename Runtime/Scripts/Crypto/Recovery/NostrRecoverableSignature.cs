@@ -6,6 +6,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using BCECCurve = Org.BouncyCastle.Math.EC.ECCurve;
 using BCECPoint = Org.BouncyCastle.Math.EC.ECPoint;
+using Org.BouncyCastle.Math.EC;
 
 namespace Nostr.Unity.Crypto.Recovery
 {
@@ -237,6 +238,42 @@ namespace Nostr.Unity.Crypto.Recovery
             }
             
             return true;
+        }
+
+        private static ECPoint RecoverPublicKey(byte[] signature, byte[] messageHash, ECCurve curve)
+        {
+            // Extract r and s from signature
+            byte[] rBytes = new byte[32];
+            byte[] sBytes = new byte[32];
+            Array.Copy(signature, 0, rBytes, 0, 32);
+            Array.Copy(signature, 32, sBytes, 0, 32);
+            
+            BigInteger r = new BigInteger(1, rBytes);
+            BigInteger s = new BigInteger(1, sBytes);
+            
+            // Calculate y-coordinate from x-coordinate
+            var x = curve.FromBigInteger(r);
+            var alpha = x.Square().Add(curve.A).Multiply(x).Add(curve.B);
+            var beta = alpha.Sqrt();
+            
+            // Choose the correct y-coordinate based on the recovery id
+            var y = beta;
+            if (signature[64] % 2 == 1)
+            {
+                y = curve.Field.Characteristic.Subtract(beta);
+            }
+            
+            // Create point R
+            var R = curve.CreatePoint(r, y.ToBigInteger());
+            
+            // Calculate public key Q
+            var e = new BigInteger(1, messageHash);
+            var rInv = r.ModInverse(curve.Order);
+            var u1 = e.Multiply(rInv).Mod(curve.Order);
+            var u2 = s.Multiply(rInv).Mod(curve.Order);
+            
+            var Q = R.Multiply(u1).Add(curve.G.Multiply(u2));
+            return Q;
         }
     }
 } 

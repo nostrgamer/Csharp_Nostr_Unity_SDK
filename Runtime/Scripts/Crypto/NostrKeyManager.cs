@@ -87,32 +87,13 @@ namespace Nostr.Unity
                 byte[] privateKeyBytes = Bech32.HexToBytes(hexPrivateKey);
                 byte[] publicKeyBytes = Secp256k1Manager.GetPublicKey(privateKeyBytes);
                 
-                // Secp256k1.Net returns 33-byte compressed public keys
-                // For Nostr, we need 32-byte public keys (the x-coordinate without the compression prefix)
-                byte[] nostrPublicKeyBytes;
-                
-                if (publicKeyBytes.Length == 33)
-                {
-                    // Remove the compression prefix (first byte)
-                    nostrPublicKeyBytes = new byte[32];
-                    Array.Copy(publicKeyBytes, 1, nostrPublicKeyBytes, 0, 32);
-                }
-                else
-                {
-                    // Unexpected format, use as-is
-                    nostrPublicKeyBytes = publicKeyBytes;
-                    Debug.LogWarning($"Unexpected public key format: {publicKeyBytes.Length} bytes");
-                }
-                
-                string hexPublicKey = Bech32.BytesToHex(nostrPublicKeyBytes);
-                
                 if (useHex)
                 {
-                    return hexPublicKey;
+                    return Bech32.BytesToHex(publicKeyBytes);
                 }
                 else
                 {
-                    return Bech32.Encode(NostrConstants.NPUB_PREFIX, nostrPublicKeyBytes);
+                    return Bech32.Encode(NostrConstants.NPUB_PREFIX, publicKeyBytes);
                 }
             }
             catch (Exception ex)
