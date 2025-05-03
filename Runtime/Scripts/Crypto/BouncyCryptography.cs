@@ -305,7 +305,7 @@ namespace Nostr.Unity
                 
                 // Create an EC public key from the compressed format
                 ECDomainParameters domain = (ECDomainParameters)_curveParams;
-                ECPoint q = domain.Curve.DecodePoint(publicKey);
+                BCECPoint q = domain.Curve.DecodePoint(publicKey);
                 ECPublicKeyParameters publicKeyParams = new ECPublicKeyParameters(q, domain);
                 
                 // Create a signer and initialize with public key for verification

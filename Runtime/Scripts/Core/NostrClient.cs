@@ -103,9 +103,12 @@ namespace Nostr.Unity
                 onComplete?.Invoke(false);
                 yield break;
             }
+            
+            Task yieldTask = connectTask;
+            yield return new WaitUntil(() => yieldTask.IsCompleted);
+            
             try
             {
-                yield return connectTask.AsCoroutine();
                 _webSockets.Add(webSocket);
                 _relayUrls.Add(relayUrl);
                 StartCoroutine(ReceiveMessagesCoroutine(webSocket, relayUrl));
@@ -131,17 +134,22 @@ namespace Nostr.Unity
             
             foreach (var webSocket in _webSockets)
             {
+                Task closeTask = null;
                 try
                 {
                     if (webSocket.State == WebSocketState.Open)
                     {
-                        var closeTask = webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
-                        yield return closeTask.AsCoroutine();
+                        closeTask = webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.LogError($"Error closing WebSocket: {ex.Message}");
+                }
+                
+                if (closeTask != null)
+                {
+                    yield return new WaitUntil(() => closeTask.IsCompleted);
                 }
             }
             

@@ -417,7 +417,10 @@ namespace Nostr.Unity
         {
             using (Aes aes = Aes.Create())
             {
-                aes.Key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+                using (SHA256 sha256 = SHA256.Create())
+                {
+                    aes.Key = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+                }
                 aes.IV = iv;
                 aes.Mode = CipherMode.CBC;
                 aes.Padding = PaddingMode.PKCS7;
@@ -439,7 +442,10 @@ namespace Nostr.Unity
         {
             using (Aes aes = Aes.Create())
             {
-                aes.Key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+                using (SHA256 sha256 = SHA256.Create())
+                {
+                    aes.Key = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+                }
                 aes.IV = iv;
                 aes.Mode = CipherMode.CBC;
                 aes.Padding = PaddingMode.PKCS7;

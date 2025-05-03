@@ -1,6 +1,7 @@
 using UnityEngine;
 using System;
 using System.Threading.Tasks;
+using System.Collections;
 
 namespace Nostr.Unity.Tests
 {
@@ -15,10 +16,10 @@ namespace Nostr.Unity.Tests
             _client = new NostrClient();
             
             // Run the tests
-            RunTests();
+            StartCoroutine(RunTests());
         }
         
-        private async void RunTests()
+        private IEnumerator RunTests()
         {
             try
             {
@@ -34,7 +35,7 @@ namespace Nostr.Unity.Tests
                 TestEventSigning();
                 
                 // Test 4: Connect to Relay and Publish
-                await TestRelayConnection();
+                yield return TestRelayConnection();
                 
                 Debug.Log("All tests completed successfully!");
             }
@@ -128,14 +129,21 @@ namespace Nostr.Unity.Tests
             Debug.Log("Event signing test passed!");
         }
         
-        private async Task TestRelayConnection()
+        private IEnumerator TestRelayConnection()
         {
             Debug.Log("Testing relay connection...");
             
             try
             {
                 // Connect to a test relay
-                await _client.ConnectToRelay("wss://relay.damus.io");
+                bool connected = false;
+                yield return _client.ConnectToRelay("wss://relay.damus.io", result => connected = result);
+                
+                if (!connected)
+                {
+                    Debug.LogError("Failed to connect to relay");
+                    yield break;
+                }
                 
                 // Create a test event
                 string privateKey = _keyManager.GeneratePrivateKey();
@@ -145,14 +153,21 @@ namespace Nostr.Unity.Tests
                 nostrEvent.Sign(privateKey);
                 
                 // Publish the event
-                await _client.PublishEvent(nostrEvent);
+                bool published = false;
+                yield return _client.PublishEvent(nostrEvent, result => published = result);
                 
-                Debug.Log("Event published successfully!");
+                if (published)
+                {
+                    Debug.Log("Event published successfully!");
+                }
+                else
+                {
+                    Debug.LogError("Failed to publish event");
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Relay test failed: {ex.Message}");
-                throw;
             }
         }
     }

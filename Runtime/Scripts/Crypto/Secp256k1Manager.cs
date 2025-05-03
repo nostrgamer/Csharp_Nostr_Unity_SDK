@@ -279,8 +279,8 @@ namespace Nostr.Unity
                 ECFieldElement xFieldElement = secp256k1Curve.FromBigInteger(x);
                 
                 // Calculate y coordinate (y² = x³ + 7 for secp256k1)
-                ECFieldElement alpha = xFieldElement.Multiply(xFieldElement.Square().Add(secp256k1Curve.FromBigInteger(new BigInteger("7"))));
-                ECFieldElement beta = alpha.Sqrt();
+                var alpha = xFieldElement.Multiply(xFieldElement.Square().Add(secp256k1Curve.FromBigInteger(new BigInteger("7"))));
+                var beta = alpha.Sqrt();
                 
                 if (beta == null)
                 {
@@ -289,7 +289,7 @@ namespace Nostr.Unity
                 
                 // Choose correct y coordinate based on isYEven
                 bool betaIsEven = !beta.ToBigInteger().TestBit(0);
-                ECFieldElement y = betaIsEven == isYEven ? beta : secp256k1Curve.FromBigInteger(secp256k1Curve.Q.Subtract(beta.ToBigInteger()));
+                var y = betaIsEven == isYEven ? beta : secp256k1Curve.FromBigInteger(secp256k1Curve.Field.Characteristic.Subtract(beta.ToBigInteger()));
                 
                 // Create point R
                 BCECPoint R = secp256k1Curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());

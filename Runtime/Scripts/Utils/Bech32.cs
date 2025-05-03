@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using NBitcoin;
 using NBitcoin.DataEncoders;
+using System.Text;
 
 namespace Nostr.Unity.Utils
 {
@@ -16,16 +17,17 @@ namespace Nostr.Unity.Utils
         /// <param name="hrp">Human-readable prefix (e.g., "npub", "nsec")</param>
         /// <param name="data">Data to encode</param>
         /// <returns>Bech32 encoded string</returns>
-        public static string Encode(string hrp, byte[] data)
+        public static string Encode(string hrp, string data)
         {
             if (string.IsNullOrEmpty(hrp))
                 throw new ArgumentException("Human-readable prefix cannot be null or empty", nameof(hrp));
             
-            if (data == null || data.Length == 0)
+            if (string.IsNullOrEmpty(data))
                 throw new ArgumentException("Data cannot be null or empty", nameof(data));
             
+            byte[] dataBytes = Encoding.UTF8.GetBytes(data);
             var encoder = new Bech32Encoder(hrp);
-            return encoder.Encode(data);
+            return encoder.Encode(dataBytes);
         }
         
         /// <summary>
@@ -33,7 +35,7 @@ namespace Nostr.Unity.Utils
         /// </summary>
         /// <param name="bech32Str">The Bech32 encoded string</param>
         /// <returns>Tuple containing the human-readable prefix and the decoded data</returns>
-        public static (string hrp, byte[] data) Decode(string bech32Str)
+        public static (string hrp, string data) Decode(string bech32Str)
         {
             if (string.IsNullOrEmpty(bech32Str))
                 throw new ArgumentException("Bech32 string cannot be null or empty", nameof(bech32Str));
@@ -49,7 +51,8 @@ namespace Nostr.Unity.Utils
             try
             {
                 var decoded = encoder.Decode(bech32Str, out _);
-                return (hrp, decoded);
+                string data = Encoding.UTF8.GetString(decoded);
+                return (hrp, data);
             }
             catch (Exception ex)
             {

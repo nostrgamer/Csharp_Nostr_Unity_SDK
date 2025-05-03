@@ -367,20 +367,13 @@ namespace Nostr.Unity.Examples
         private void TestEventSerialization()
         {
             // Create a test event
-            NostrEvent testEvent = new NostrEvent();
-            testEvent.Kind = 1; // Text note
-            testEvent.CreatedAt = 1683036160; // Fixed timestamp for consistent ID
-            testEvent.Content = "Test message";
-            testEvent.PublicKey = _publicKey;
-            testEvent.Tags = new string[][] 
+            var tags = new string[][] 
             {
                 new string[] { "e", "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" },
                 new string[] { "p", "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" }
             };
             
-            // Compute ID
-            string id = testEvent.ComputeId();
-            Debug.Log($"Test Event ID: {id}");
+            NostrEvent testEvent = new NostrEvent(_publicKey, 1, "Test message", tags);
             
             // Sign the event
             testEvent.Sign(_privateKey);

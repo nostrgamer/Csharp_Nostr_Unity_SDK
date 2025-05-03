@@ -271,14 +271,7 @@ namespace Nostr.Unity
                     throw new InvalidOperationException("Private key not set. Cannot sign event.");
                 }
                 
-                var nostrEvent = new NostrEvent
-                {
-                    Kind = (int)NostrEventKind.TextNote,
-                    PubKey = PublicKey,
-                    Content = content,
-                    CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                };
-                
+                var nostrEvent = new NostrEvent(PublicKey, (int)NostrEventKind.TextNote, content, Array.Empty<string[]>());
                 nostrEvent.Sign(PrivateKey);
                 
                 Debug.Log($"Posting note: {content}");

@@ -192,10 +192,9 @@ namespace Nostr.Unity.Crypto.Recovery
                 ECFieldElement xFieldElement = curve.FromBigInteger(x);
                 
                 // Calculate y coordinate (y² = x³ + 7 for secp256k1)
-                ECFieldElement alpha = xFieldElement.Multiply(xFieldElement.Square().Add(curve.FromBigInteger(new BigInteger("7"))));
-                ECFieldElement beta = alpha.Sqrt();
+                var alpha = xFieldElement.Multiply(xFieldElement.Square().Add(curve.FromBigInteger(new BigInteger("7"))));
+                var beta = alpha.Sqrt();
                 
-                // If we couldn't calculate a valid y coordinate, the signature is invalid for this recovery ID
                 if (beta == null)
                 {
                     throw new ArgumentException($"Invalid signature: no valid y-coordinate for recovery ID {recoveryId}");
@@ -203,7 +202,7 @@ namespace Nostr.Unity.Crypto.Recovery
                 
                 // Choose correct y coordinate based on isYEven
                 bool betaIsEven = beta.ToBigInteger().TestBit(0) == false;
-                ECFieldElement y = betaIsEven == isYEven ? beta : curve.FromBigInteger(curve.Q.Subtract(beta.ToBigInteger()));
+                var y = betaIsEven == isYEven ? beta : curve.FromBigInteger(curve.Field.Characteristic.Subtract(beta.ToBigInteger()));
                 
                 // Create point R
                 BCECPoint R = curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
