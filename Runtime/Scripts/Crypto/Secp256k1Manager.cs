@@ -6,6 +6,8 @@ using Org.BouncyCastle.Asn1.Sec;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC;
+using BCECCurve = Org.BouncyCastle.Math.EC.ECCurve;
+using BCECPoint = Org.BouncyCastle.Math.EC.ECPoint;
 
 namespace Nostr.Unity
 {
@@ -273,7 +275,7 @@ namespace Nostr.Unity
                 BigInteger x = isSecondKey ? r.Add(n) : r;
                 
                 // Find the curve point with x coordinate
-                ECCurve secp256k1Curve = curveParams.Curve;
+                BCECCurve secp256k1Curve = curveParams.Curve;
                 ECFieldElement xFieldElement = secp256k1Curve.FromBigInteger(x);
                 
                 // Calculate y coordinate (y² = x³ + 7 for secp256k1)
@@ -290,15 +292,15 @@ namespace Nostr.Unity
                 ECFieldElement y = betaIsEven == isYEven ? beta : secp256k1Curve.FromBigInteger(secp256k1Curve.Q.Subtract(beta.ToBigInteger()));
                 
                 // Create point R
-                ECPoint R = secp256k1Curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
+                BCECPoint R = secp256k1Curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
                 
                 // Calculate public key Q = (s * R - e * G) / r
-                ECPoint G = curveParams.G;
+                BCECPoint G = curveParams.G;
                 BigInteger rInverse = r.ModInverse(n);
                 
                 // Different calculation method to avoid inverting r twice
                 // Q = r^-1 (sR - eG)
-                ECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
+                BCECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
                 
                 // Convert to compressed format (33 bytes)
                 return Q.GetEncoded(true);

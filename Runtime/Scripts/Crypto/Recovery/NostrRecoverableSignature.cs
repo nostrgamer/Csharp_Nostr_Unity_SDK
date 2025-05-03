@@ -4,7 +4,8 @@ using UnityEngine;
 using Org.BouncyCastle.Asn1.Sec;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Math.EC;
+using BCECCurve = Org.BouncyCastle.Math.EC.ECCurve;
+using BCECPoint = Org.BouncyCastle.Math.EC.ECPoint;
 
 namespace Nostr.Unity.Crypto.Recovery
 {
@@ -132,7 +133,7 @@ namespace Nostr.Unity.Crypto.Recovery
                     try
                     {
                         // Recover the public key with this recovery ID
-                        Org.BouncyCastle.Math.EC.ECPoint q = RecoverPublicKey(r, s, messageHash, i, curveParams);
+                        BCECPoint q = RecoverPublicKey(r, s, messageHash, i, curveParams);
                         
                         // Convert to compressed format
                         byte[] recoveredKey = q.GetEncoded(true);
@@ -164,7 +165,7 @@ namespace Nostr.Unity.Crypto.Recovery
         /// <summary>
         /// Recovers the public key from a signature, message hash, and recovery ID
         /// </summary>
-        private Org.BouncyCastle.Math.EC.ECPoint RecoverPublicKey(BigInteger r, BigInteger s, byte[] messageHash, byte recoveryId, ECDomainParameters curveParams)
+        private BCECPoint RecoverPublicKey(BigInteger r, BigInteger s, byte[] messageHash, byte recoveryId, ECDomainParameters curveParams)
         {
             try
             {
@@ -187,7 +188,7 @@ namespace Nostr.Unity.Crypto.Recovery
                 }
                 
                 // Find the curve point with x coordinate
-                ECCurve curve = curveParams.Curve;
+                BCECCurve curve = curveParams.Curve;
                 ECFieldElement xFieldElement = curve.FromBigInteger(x);
                 
                 // Calculate y coordinate (y² = x³ + 7 for secp256k1)
@@ -205,13 +206,13 @@ namespace Nostr.Unity.Crypto.Recovery
                 ECFieldElement y = betaIsEven == isYEven ? beta : curve.FromBigInteger(curve.Q.Subtract(beta.ToBigInteger()));
                 
                 // Create point R
-                Org.BouncyCastle.Math.EC.ECPoint R = curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
+                BCECPoint R = curve.CreatePoint(xFieldElement.ToBigInteger(), y.ToBigInteger());
                 
                 // Calculate public key Q = (s * R - e * G) / r
-                Org.BouncyCastle.Math.EC.ECPoint G = curveParams.G;
+                BCECPoint G = curveParams.G;
                 BigInteger rInverse = r.ModInverse(n);
                 
-                Org.BouncyCastle.Math.EC.ECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
+                BCECPoint Q = R.Multiply(s).Subtract(G.Multiply(e)).Multiply(rInverse);
                 
                 return Q;
             }

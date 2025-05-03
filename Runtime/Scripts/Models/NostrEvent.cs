@@ -90,10 +90,8 @@ namespace Nostr.Unity
             Id = ComputeId();
             
             // Sign the event
-            using (var keyManager = new NostrKeyManager())
-            {
-                Signature = keyManager.SignMessage(GetSerializedEvent(), privateKey);
-            }
+            var keyManager = new NostrKeyManager();
+            Signature = keyManager.SignMessage(GetSerializedEvent(), privateKey);
         }
         
         /// <summary>
@@ -107,10 +105,8 @@ namespace Nostr.Unity
             
             try
             {
-                using (var keyManager = new NostrKeyManager())
-                {
-                    return keyManager.VerifySignature(GetSerializedEvent(), Signature, PublicKey);
-                }
+                var keyManager = new NostrKeyManager();
+                return keyManager.VerifySignature(GetSerializedEvent(), Signature, PublicKey);
             }
             catch (Exception ex)
             {
@@ -129,8 +125,11 @@ namespace Nostr.Unity
                 throw new InvalidOperationException("Public key must be set before computing ID");
             
             string serializedEvent = GetSerializedEvent();
-            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(serializedEvent));
-            return Bech32.BytesToHex(hash);
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(serializedEvent));
+                return Bech32.BytesToHex(hash);
+            }
         }
         
         /// <summary>

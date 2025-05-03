@@ -56,7 +56,7 @@ namespace Nostr.Unity.Tests
             Debug.Log($"Generated public key: {publicKey}");
             
             // Store the keys
-            bool stored = _keyManager.StoreKeys(privateKey, encrypt: true, password: "test123");
+            bool stored = _keyManager.StoreKeys(privateKey, "test123");
             if (!stored)
             {
                 throw new Exception("Failed to store keys");

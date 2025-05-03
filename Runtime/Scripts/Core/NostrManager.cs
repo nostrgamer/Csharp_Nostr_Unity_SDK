@@ -120,13 +120,13 @@ namespace Nostr.Unity
         /// </summary>
         public void LoadOrCreateKeys()
         {
-            PrivateKey = _keyManager.LoadPrivateKey(false); // Load in hex format
+            PrivateKey = _keyManager.LoadPrivateKey("testpassword", false); // Load in hex format
             
             if (string.IsNullOrEmpty(PrivateKey) && autoGenerateKeys)
             {
                 Debug.Log("No keys found, generating new ones...");
                 PrivateKey = _keyManager.GeneratePrivateKey(true); // Generate in hex format
-                _keyManager.StoreKeys(PrivateKey);
+                _keyManager.StoreKeys(PrivateKey, "testpassword");
             }
             
             if (!string.IsNullOrEmpty(PrivateKey))
@@ -201,7 +201,7 @@ namespace Nostr.Unity
                 
                 if (save)
                 {
-                    bool success = _keyManager.StoreKeys(hexPrivateKey);
+                    bool success = _keyManager.StoreKeys(hexPrivateKey, "testpassword");
                     if (!success)
                     {
                         Debug.LogWarning("Failed to store keys in PlayerPrefs");

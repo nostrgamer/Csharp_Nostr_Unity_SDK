@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using Newtonsoft.Json;
 using Nostr.Unity.Utils;
+using System.Collections;
 
 namespace Nostr.Unity
 {
@@ -70,46 +71,51 @@ namespace Nostr.Unity
         public IEnumerator ConnectToRelay(string relayUrl, Action<bool> onComplete = null)
         {
             bool result = false;
+            Exception error = null;
+            ClientWebSocket webSocket = null;
+            Task connectTask = null;
+            // Validate input outside try-catch
+            if (string.IsNullOrEmpty(relayUrl))
+                throw new ArgumentException("Relay URL cannot be null or empty", nameof(relayUrl));
+            if (!relayUrl.StartsWith("wss://") && !relayUrl.StartsWith("ws://"))
+                throw new ArgumentException("Relay URL must start with wss:// or ws://", nameof(relayUrl));
             try
             {
-                if (string.IsNullOrEmpty(relayUrl))
-                    throw new ArgumentException("Relay URL cannot be null or empty", nameof(relayUrl));
-                
-                if (!relayUrl.StartsWith("wss://") && !relayUrl.StartsWith("ws://"))
-                    throw new ArgumentException("Relay URL must start with wss:// or ws://", nameof(relayUrl));
-                
-                var webSocket = new ClientWebSocket();
-                var connectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
-                
-                // Add timeout
-                float timeout = 10f;
-                while (!connectTask.IsCompleted && timeout > 0)
-                {
-                    timeout -= Time.deltaTime;
-                    yield return null;
-                }
-                
-                if (timeout <= 0)
-                {
-                    Debug.LogError($"Connection to relay {relayUrl} timed out");
-                    onComplete?.Invoke(false);
-                    yield break;
-                }
-                
+                webSocket = new ClientWebSocket();
+                connectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to start connection to relay {relayUrl}: {ex.Message}");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+            // Add timeout
+            float timeout = 10f;
+            while (!connectTask.IsCompleted && timeout > 0)
+            {
+                timeout -= Time.deltaTime;
+                yield return null;
+            }
+            if (timeout <= 0)
+            {
+                Debug.LogError($"Connection to relay {relayUrl} timed out");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+            try
+            {
                 yield return connectTask.AsCoroutine();
-                
                 _webSockets.Add(webSocket);
                 _relayUrls.Add(relayUrl);
-                
-                // Start receiving messages in the background
                 StartCoroutine(ReceiveMessagesCoroutine(webSocket, relayUrl));
-                
                 Debug.Log($"Connected to relay: {relayUrl}");
                 result = true;
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Failed to connect to relay {relayUrl}: {ex.Message}");
+                result = false;
             }
             onComplete?.Invoke(result);
         }
@@ -154,43 +160,35 @@ namespace Nostr.Unity
         public IEnumerator PublishEvent(NostrEvent nostrEvent, Action<bool> onComplete = null)
         {
             bool success = false;
-            try
+            Exception error = null;
+            // Validate input outside try-catch
+            if (nostrEvent == null)
+                throw new ArgumentNullException(nameof(nostrEvent));
+            if (string.IsNullOrEmpty(nostrEvent.Id))
+                throw new ArgumentException("Event ID cannot be null or empty", nameof(nostrEvent));
+            if (string.IsNullOrEmpty(nostrEvent.Signature))
+                throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
+            if (!nostrEvent.VerifySignature())
+                throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
+            var eventMessage = new object[] { "EVENT", nostrEvent };
+            string jsonMessage = JsonConvert.SerializeObject(eventMessage);
+            foreach (var webSocket in _webSockets)
             {
-                if (nostrEvent == null)
-                    throw new ArgumentNullException(nameof(nostrEvent));
-                
-                if (string.IsNullOrEmpty(nostrEvent.Id))
-                    throw new ArgumentException("Event ID cannot be null or empty", nameof(nostrEvent));
-                
-                if (string.IsNullOrEmpty(nostrEvent.Signature))
-                    throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
-                
-                if (!nostrEvent.VerifySignature())
-                    throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
-                
-                var eventMessage = new object[] { "EVENT", nostrEvent };
-                string jsonMessage = JsonConvert.SerializeObject(eventMessage);
-                
-                foreach (var webSocket in _webSockets)
+                if (webSocket.State == WebSocketState.Open)
                 {
+                    Task sendTask = null;
                     try
                     {
-                        if (webSocket.State == WebSocketState.Open)
-                        {
-                            var sendTask = webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
-                            yield return sendTask.AsCoroutine();
-                            success = true;
-                        }
+                        sendTask = webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogError($"Failed to publish event to relay: {ex.Message}");
+                        Debug.LogError($"Failed to start sending event to relay: {ex.Message}");
+                        continue;
                     }
+                    yield return sendTask.AsCoroutine();
+                    success = true;
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"PublishEvent error: {ex.Message}");
             }
             onComplete?.Invoke(success);
         }
@@ -242,9 +240,9 @@ namespace Nostr.Unity
         {
             var buffer = new byte[4096];
             int reconnectAttempts = 0;
-            
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
+                bool shouldReconnect = false;
                 try
                 {
                     if (webSocket.State != WebSocketState.Open)
@@ -252,12 +250,7 @@ namespace Nostr.Unity
                         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS)
                         {
                             Debug.Log($"Attempting to reconnect to {relayUrl} (attempt {reconnectAttempts + 1}/{MAX_RECONNECT_ATTEMPTS})");
-                            yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
-                            
-                            var reconnectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
-                            yield return reconnectTask.AsCoroutine();
-                            reconnectAttempts = 0;
-                            Debug.Log($"Reconnected to relay: {relayUrl}");
+                            shouldReconnect = true;
                         }
                         else
                         {
@@ -265,29 +258,50 @@ namespace Nostr.Unity
                             break;
                         }
                     }
-                    
-                    var receiveTask = webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
-                    yield return receiveTask.AsCoroutine();
-                    var result = receiveTask.Result;
-                    
-                    if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        Debug.Log($"Received close message from {relayUrl}");
-                        break;
-                    }
-                    
-                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    HandleMessage(message, relayUrl);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"Error receiving message from {relayUrl}: {ex.Message}");
+                    Debug.LogError($"Error checking WebSocket state: {ex.Message}");
                     yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
+                    continue;
                 }
+                if (shouldReconnect)
+                {
+                    yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
+                    Task reconnectTask = null;
+                    try
+                    {
+                        reconnectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error starting reconnect: {ex.Message}");
+                        continue;
+                    }
+                    yield return reconnectTask.AsCoroutine();
+                    reconnectAttempts = 0;
+                    Debug.Log($"Reconnected to relay: {relayUrl}");
+                }
+                Task receiveTask = null;
+                try
+                {
+                    receiveTask = webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error starting receive: {ex.Message}");
+                    yield return new WaitForSeconds(RECONNECT_DELAY_MS / 1000f);
+                    continue;
+                }
+                yield return receiveTask.AsCoroutine();
+                var result = receiveTask.Result;
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    Debug.Log($"Received close message from {relayUrl}");
+                    break;
+                }
+                string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                HandleMessage(message, relayUrl);
             }
         }
         

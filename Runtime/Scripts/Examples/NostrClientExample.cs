@@ -95,11 +95,11 @@ namespace Nostr.Unity.Examples
                     {
                         // In production, you'd prompt the user for a password
                         // This is just for demonstration
-                        _privateKey = DecryptPrivateKey(_keyManager.LoadPrivateKey(useBech32: false), encryptionPassword);
+                        _privateKey = DecryptPrivateKey(_keyManager.LoadPrivateKey("testpassword", useBech32: false), encryptionPassword);
                     }
                     else
                     {
-                        _privateKey = _keyManager.LoadPrivateKey(useBech32: false);
+                        _privateKey = _keyManager.LoadPrivateKey("testpassword", useBech32: false);
                     }
                     
                     UpdateStatus("Loaded existing keys");
@@ -113,7 +113,7 @@ namespace Nostr.Unity.Examples
                     if (useEncryption)
                     {
                         string encryptedKey = EncryptPrivateKey(_privateKey, encryptionPassword);
-                        bool stored = _keyManager.StoreKeys(encryptedKey, encrypt: false); // Already encrypted
+                        bool stored = _keyManager.StoreKeys(encryptedKey, "testpassword"); // Already encrypted
                         
                         if (stored)
                         {
@@ -126,7 +126,7 @@ namespace Nostr.Unity.Examples
                     }
                     else
                     {
-                        bool stored = _keyManager.StoreKeys(_privateKey, encrypt: false);
+                        bool stored = _keyManager.StoreKeys(_privateKey, "testpassword");
                         
                         if (stored)
                         {
