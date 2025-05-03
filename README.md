@@ -5,45 +5,50 @@ A Unity SDK for integrating Nostr protocol into Unity applications.
 ## Requirements
 
 - Unity 2021.3 or later
-- .NET Standard 2.0 / .NET 4.x compatibility
+- .NET Standard 2.0 / 2.1 .NET 4.x compatibility
 
 ## Installation
 
-### Option 1: Using Unity Package Manager
+### 1. Download Required DLLs
 
-1. Open the Package Manager window in Unity (Window > Package Manager)
-2. Click the "+" button and select "Add package from git URL..."
-3. Enter the following URL: `https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK.git`
+You need the following DLLs (exact names):
+- `BouncyCastle.Crypto.dll` (from the official BouncyCastle NuGet package, netstandard2.0 or netstandard2.1)
+- `NBitcoin.dll` (from the official NBitcoin NuGet package, netstandard2.1)
+- `Newtonsoft.Json.dll` (from the official Newtonsoft.Json NuGet package, netstandard2.0 or netstandard2.1)
+- `Microsoft.Extensions.Logging.Abstractions.dll` (from Microsoft.Extensions.Logging.Abstractions NuGet, netstandard2.0 or netstandard2.1)
 
-### Option 2: Manual Installation
+**Do NOT use `BouncyCastle.Cryptography.dll` or any other similarly named DLLs.**
 
-1. Download the latest release from the [Releases](https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK/releases) page
-2. Import the package into your Unity project
+### 2. Place DLLs in Unity
+
+1. Create a folder in your Unity project: `Assets/Plugins/`
+2. Copy all the above DLLs into `Assets/Plugins/`
+3. In Unity, select each DLL and ensure "Any Platform" is checked in the Inspector.
+
+### 3. Unity Project Settings
+
+- Go to `Edit > Project Settings > Player > Other Settings > Api Compatibility Level` and set to **.NET Standard 2.1** (recommended for Unity 6 and above).
+
+### 4. Assembly Definition
+
+- The SDK's `NostrSDK.asmdef` is already configured to reference these DLLs. No changes needed.
+
+### 5. Clean and Reimport (if needed)
+
+- If you have errors, close Unity, delete the `Library/` and `Temp/` folders, and reopen Unity.
 
 ## Dependencies
 
-This package relies on:
-- NBitcoin (for Bech32 encoding/decoding)
-- Newtonsoft.Json (for JSON serialization/deserialization)
-- BouncyCastle.Crypto (for cryptographic operations)
-- Microsoft.Extensions (required dependency)
+This SDK requires the following external libraries (DLLs):
 
-### Installing Dependencies
+| Library Name                                      | DLL Name                                    | Source (NuGet)                                      |
+|---------------------------------------------------|---------------------------------------------|-----------------------------------------------------|
+| BouncyCastle (official)                           | BouncyCastle.Crypto.dll                     | [BouncyCastle](https://www.nuget.org/packages/BouncyCastle/) |
+| NBitcoin                                          | NBitcoin.dll                                | [NBitcoin](https://www.nuget.org/packages/NBitcoin/)         |
+| Newtonsoft.Json                                   | Newtonsoft.Json.dll                         | [Newtonsoft.Json](https://www.nuget.org/packages/Newtonsoft.Json/) |
+| Microsoft.Extensions.Logging.Abstractions         | Microsoft.Extensions.Logging.Abstractions.dll| [Microsoft.Extensions.Logging.Abstractions](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions/) |
 
-To install the required dependencies:
-
-1. First, install the NuGet Custom package:
-   - Download the NuGet package from the [NuGet release page](https://github.com/GlitchEnzo/NuGetForUnity/releases)
-   - In Unity, go to Assets > Import Package > Custom Package
-   - Navigate to and select the downloaded NuGet package
-
-2. Once installed, go to NuGet > Manage NuGet Packages in Unity
-3. Search for and install the following packages:
-   - BouncyCastle.Cryptography (this will automatically install Microsoft.Extensions)
-   - NBitcoin
-   - Newtonsoft.Json
-
-The packages will be installed in the appropriate location and the assembly definition file in the SDK is configured to reference these dependencies correctly.
+**All DLLs must be from the `netstandard2.1` (or `netstandard2.0` if available) folder of the NuGet package.**
 
 ## Getting Started
 
