@@ -50,148 +50,132 @@ This SDK requires the following external libraries (DLLs):
 
 ## Getting Started
 
-### Basic Setup
+### Quick Setup
 
-1. Create a new GameObject in your scene
-2. Add the `NostrClient.cs` script as a component to it
-3. NostrKeyManager is not a MonoBehaviour - instead, create an instance of it:
-
-```csharp
-// Create an instance of NostrKeyManager
-NostrKeyManager keyManager = new NostrKeyManager();
-
-// Or in the MonoBehaviour's Start/Awake method
-private NostrKeyManager _keyManager;
-
-void Awake()
-{
-    _keyManager = new NostrKeyManager();
-}
-```
-
-### Key Management
+1. Add the SDK to your Unity project
+2. Create a new GameObject in your scene
+3. Add the `NostrManager.cs` script as a component to it
+4. Configure the NostrManager in the Inspector (optional: add default relays)
+5. Create a new script to interact with NostrManager (e.g., `MyNostrApp.cs`) and attach it to a GameObject
+6. Copy and paste the following example code:
 
 ```csharp
-// If NostrKeyManager is a field in your MonoBehaviour
-private NostrKeyManager _keyManager;
+using UnityEngine;
+using Nostr.Unity;
 
-void Awake()
+public class MyNostrApp : MonoBehaviour
 {
-    _keyManager = new NostrKeyManager();
-}
-
-void Start()
-{
-    // Generate a new key pair
-    string privateKey = _keyManager.GeneratePrivateKey();
-    string publicKey = _keyManager.GetPublicKey(privateKey);
-
-    // Store keys securely with encryption
-    bool stored = _keyManager.StoreKeys(privateKey, "your-secure-password");
-
-    // Load previously stored keys
-    string loadedPrivateKey = _keyManager.LoadPrivateKey("your-secure-password");
-}
-```
-
-### Connecting to Relays
-
-```csharp
-// Get a reference to the client
-NostrClient client = GetComponent<NostrClient>();
-
-// Connect to a relay using the coroutine pattern
-StartCoroutine(client.ConnectToRelay("wss://relay.damus.io", (success) => {
-    if (success) {
-        Debug.Log("Connected to relay successfully");
-    } else {
-        Debug.LogError("Failed to connect to relay");
-    }
-}));
-
-// Connect to multiple relays
-List<string> relayUrls = new List<string> {
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.snort.social"
-};
-
-foreach (string url in relayUrls) {
-    StartCoroutine(client.ConnectToRelay(url, (success) => {
-        if (success) {
-            Debug.Log($"Connected to {url}");
+    // Reference to the NostrManager component
+    [SerializeField] private NostrManager nostrManager;
+    
+    void Start()
+    {
+        // If not assigned in the Inspector, find the NostrManager component
+        if (nostrManager == null)
+        {
+            nostrManager = FindObjectOfType<NostrManager>();
+            if (nostrManager == null)
+            {
+                Debug.LogError("NostrManager component not found in scene. Please add it to a GameObject first.");
+                return;
+            }
         }
-    }));
+        
+        // Subscribe to events
+        nostrManager.OnConnected += OnRelayConnected;
+        nostrManager.OnDisconnected += OnRelayDisconnected;
+        nostrManager.OnError += OnError;
+        nostrManager.OnEventReceived += OnEventReceived;
+    }
+    
+    // Event handlers
+    private void OnRelayConnected(string relayUrl)
+    {
+        Debug.Log($"Connected to relay: {relayUrl}");
+    }
+    
+    private void OnRelayDisconnected(string relayUrl)
+    {
+        Debug.Log($"Disconnected from relay: {relayUrl}");
+    }
+    
+    private void OnError(string errorMessage)
+    {
+        Debug.LogError($"Nostr error: {errorMessage}");
+    }
+    
+    private void OnEventReceived(NostrEvent nostrEvent)
+    {
+        Debug.Log($"Event received: {nostrEvent.Content}");
+    }
+    
+    // Example: Publish a text note
+    public void PublishTextNote(string content)
+    {
+        if (nostrManager == null) return;
+        
+        // The NostrManager handles key management and signing internally
+        nostrManager.PublishTextNote(content, (success) => {
+            Debug.Log(success ? "Note published successfully" : "Failed to publish note");
+        });
+    }
+    
+    // Example: Connect to a specific relay
+    public void ConnectToRelay(string relayUrl)
+    {
+        if (nostrManager == null) return;
+        
+        nostrManager.ConnectToRelay(relayUrl);
+    }
+    
+    // Example: Subscribe to notes from a specific user
+    public void SubscribeToUser(string publicKey)
+    {
+        if (nostrManager == null) return;
+        
+        var filter = new Filter();
+        filter.Authors = new System.Collections.Generic.List<string> { publicKey };
+        filter.Kinds = new System.Collections.Generic.List<int> { (int)NostrEventKind.TextNote };
+        
+        string subscriptionId = nostrManager.Subscribe(filter);
+        Debug.Log($"Subscribed to user with ID: {subscriptionId}");
+    }
 }
 ```
 
-### Publishing Events
+This example demonstrates the recommended way to use the SDK. The `NostrManager` component handles the complexity of key management, relay connections, and event signing for you.
+
+### What NostrManager Does For You
+
+The NostrManager component automatically:
+1. Initializes cryptography
+2. Generates or loads keys
+3. Manages relay connections
+4. Handles event signing
+5. Provides a simple API for common operations
+
+### Manual Key Management (If Needed)
+
+If you need direct access to the key management functionality, you can use:
 
 ```csharp
-// Create a new event
-var nostrEvent = new NostrEvent(
-    publicKey,                 // your public key
-    (int)NostrEventKind.TextNote,  // kind 1 = text note
-    "Hello from Unity!"        // content
-);
+// Get access to the key manager
+NostrKeyManager keyManager = nostrManager.KeyManager;
 
-// Sign the event with your private key
-nostrEvent.Sign(privateKey);
+// Example: Get your public key
+string myPublicKey = nostrManager.PublicKey;
 
-// Publish the event
-StartCoroutine(client.PublishEvent(nostrEvent, (success) => {
-    if (success) {
-        Debug.Log("Event published successfully");
-    } else {
-        Debug.LogError("Failed to publish event");
-    }
-}));
+// Example: Sign a custom message (rarely needed)
+string signature = keyManager.SignMessage("Custom message", nostrManager.PrivateKey);
 ```
 
-### Subscribing to Events
+### Best Practices
 
-```csharp
-// Create a filter for the events you want to receive
-var filter = new Filter();
-filter.Kinds = new List<int> { (int)NostrEventKind.TextNote };
-filter.Authors = new List<string> { publicKey };
-
-// Subscribe to events matching the filter
-string subscriptionId = client.Subscribe(filter, (nostrEvent) => {
-    Debug.Log($"Received event: {nostrEvent.Content}");
-});
-
-// Later, when you want to unsubscribe
-client.Unsubscribe(subscriptionId);
-```
-
-### Error Handling
-
-The SDK includes error handling for common scenarios with event-based notifications:
-- Connection timeouts and auto-reconnect
-- Invalid keys and signature verification
-- Failed event publishing
-- Network errors
-
-Use the Connected, Disconnected, and Error events on the NostrClient to handle different scenarios:
-
-```csharp
-client.Connected += (sender, relayUrl) => {
-    Debug.Log($"Connected to {relayUrl}");
-};
-
-client.Disconnected += (sender, relayUrl) => {
-    Debug.Log($"Disconnected from {relayUrl}");
-};
-
-client.Error += (sender, errorMessage) => {
-    Debug.LogError($"Error: {errorMessage}");
-};
-
-client.EventReceived += (sender, args) => {
-    Debug.Log($"Event received from {args.RelayUrl}: {args.Event.Content}");
-};
-```
+1. Always use the NostrManager component for the simplest integration
+2. Secure your keys with strong passwords
+3. Handle connection errors gracefully
+4. Test with multiple relays for reliability
+5. Subscribe to specific event types to avoid unnecessary network traffic
 
 ## Features
 
@@ -233,123 +217,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgements
 
 - [Nostr Protocol](https://github.com/nostr-protocol/nips)
-- [BouncyCastle](https://www.bouncycastle.org/)
-
-## Csharp Nostr Unity SDK
-
-A Unity SDK for interacting with the Nostr protocol, written in C#.
-
-### Features
-- .NET Standard 2.0 / 2.1 .NET 4.x compatibility
-- Key management and cryptographic operations
-- Event creation and signing
-- Relay connection management
-- Secure key storage
-
-### Quick Start
-
-1. Add the SDK to your Unity project
-2. Create a new GameObject in your scene
-3. Add the `NostrClient.cs` script as a component to it
-4. Create a new script in your Unity project (e.g., `NostrExample.cs`) and attach it to a GameObject
-5. Copy and paste the following example code:
-
-```csharp
-using UnityEngine;
-using Nostr.Unity;
-
-public class NostrExample : MonoBehaviour
-{
-    private NostrManager nostrManager;
-    
-    void Start()
-    {
-        // Create a GameObject to hold the NostrManager if it doesn't exist
-        GameObject nostrObject = new GameObject("NostrManager");
-        nostrManager = nostrObject.AddComponent<NostrManager>();
-        
-        // The NostrManager will automatically:
-        // 1. Initialize the key manager
-        // 2. Load existing keys or generate new ones
-        // 3. Connect to default relays
-        
-        // Subscribe to events
-        nostrManager.OnConnected += (relay) => Debug.Log($"Connected to relay: {relay}");
-        nostrManager.OnDisconnected += (relay) => Debug.Log($"Disconnected from relay: {relay}");
-        nostrManager.OnError += (error) => Debug.Log($"Error: {error}");
-        nostrManager.OnEventReceived += (nostrEvent) => Debug.Log($"Received event: {nostrEvent.Content}");
-    }
-    
-    // Example of how to publish a text note
-    public async void PublishTextNote(string content)
-    {
-        if (nostrManager != null && nostrManager.Client != null)
-        {
-            var textNote = new NostrEvent(
-                nostrManager.PublicKey,
-                (int)NostrEventKind.TextNote,
-                content
-            );
-            
-            // The event will be automatically signed using your private key
-            await nostrManager.Client.PublishEvent(textNote);
-        }
-    }
-}
-```
-
-### Advanced Usage
-
-For more control over key management, you can use the `NostrKeyManager` directly:
-
-```csharp
-using UnityEngine;
-using Nostr.Unity;
-
-public class AdvancedNostrExample : MonoBehaviour
-{
-    private NostrKeyManager keyManager;
-    
-    void Start()
-    {
-        // Initialize the key manager
-        keyManager = new NostrKeyManager();
-        
-        // Generate a new private key (returns hex format by default)
-        string privateKey = keyManager.GeneratePrivateKey();
-        
-        // Get the corresponding public key
-        string publicKey = keyManager.GetPublicKey(privateKey);
-        
-        // Store keys securely (with encryption)
-        bool stored = keyManager.StoreKeys(privateKey, "your-secure-password");
-        
-        // Load stored keys later
-        string loadedPrivateKey = keyManager.LoadPrivateKey("your-secure-password");
-        
-        // Sign a message
-        string message = "Hello, Nostr!";
-        string signature = keyManager.SignMessage(message, privateKey);
-        
-        // Verify a signature
-        bool isValid = keyManager.VerifySignature(message, signature, publicKey);
-    }
-}
-```
-
-### Best Practices
-
-1. Always store private keys securely using the built-in encryption
-2. Use try-catch blocks when performing cryptographic operations
-3. Check connection status before publishing events
-4. Subscribe to events to handle connection state changes
-5. Use the `NostrManager` for simplified integration
-6. Keep your password secure and never hardcode it
-
-### Documentation
-
-For more detailed documentation and examples, see the [Wiki](link-to-wiki).
-
-### License
-
-[Your License] 
+- [BouncyCastle](https://www.bouncycastle.org/) 
