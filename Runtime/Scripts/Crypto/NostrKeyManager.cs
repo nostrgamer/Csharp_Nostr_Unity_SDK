@@ -257,6 +257,10 @@ namespace Nostr.Unity
                 if (string.IsNullOrEmpty(password))
                     throw new ArgumentException("Password cannot be null or empty", nameof(password));
                 
+                Debug.LogWarning("WARNING: The current encryption implementation is not secure for production use. " +
+                               "It uses basic AES encryption with a simple password hash. " +
+                               "For production use, implement a more secure key storage solution.");
+                
                 // Get the public key
                 string publicKey = GetPublicKey(privateKey);
                 

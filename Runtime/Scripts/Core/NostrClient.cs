@@ -85,6 +85,22 @@ namespace Nostr.Unity
                 
                 var webSocket = new ClientWebSocket();
                 var connectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                
+                // Add timeout
+                float timeout = 10f;
+                while (!connectTask.IsCompleted && timeout > 0)
+                {
+                    timeout -= Time.deltaTime;
+                    yield return null;
+                }
+                
+                if (timeout <= 0)
+                {
+                    Debug.LogError($"Connection to relay {relayUrl} timed out");
+                    onComplete?.Invoke(false);
+                    yield break;
+                }
+                
                 yield return connectTask.AsCoroutine();
                 
                 _webSockets.Add(webSocket);
