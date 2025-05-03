@@ -175,14 +175,28 @@ namespace Nostr.Unity.Tests
         
         private IEnumerator PublishEventAndHandleResult(NostrEvent nostrEvent, Action<bool> callback)
         {
+            // Move the yield statement out of the try/catch block
+            IEnumerator publishCoroutine = null;
+            
             try
             {
-                yield return _client.PublishEvent(nostrEvent, callback);
+                // Get the coroutine but don't start yielding yet
+                publishCoroutine = _client.PublishEvent(nostrEvent, callback);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Relay test failed: {ex.Message}");
                 callback(false);
+                yield break;
+            }
+            
+            // Now yield outside the try/catch
+            if (publishCoroutine != null)
+            {
+                while (publishCoroutine.MoveNext())
+                {
+                    yield return publishCoroutine.Current;
+                }
             }
         }
     }
