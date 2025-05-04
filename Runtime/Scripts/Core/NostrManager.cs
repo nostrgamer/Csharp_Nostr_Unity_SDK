@@ -432,33 +432,52 @@ namespace Nostr.Unity
             long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Debug.Log($"TIMESTAMP TEST - Current UTC timestamp: {currentTime} ({DateTimeOffset.FromUnixTimeSeconds(currentTime).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
             
-            // Validate keys match - the public key should be derived from the private key
+            // Validate and ensure keys match - the public key must be derived from the private key
             try
             {
-                string derivedPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
-                Debug.Log($"KEY VALIDATION - Derived public key from private key: {derivedPublicKey}");
-                Debug.Log($"KEY VALIDATION - Stored compressed public key: {CompressedPublicKey}");
+                // Derive the compressed public key (with 02/03 prefix) from the private key
+                string derivedCompressedKey = _keyManager.GetPublicKey(PrivateKey, true);
+                Debug.Log($"KEY VALIDATION - Derived public key from private key: {derivedCompressedKey}");
                 
-                if (!string.IsNullOrEmpty(CompressedPublicKey) && 
-                    !string.Equals(derivedPublicKey, CompressedPublicKey, StringComparison.OrdinalIgnoreCase))
+                // If we have a stored compressed key, check it
+                if (!string.IsNullOrEmpty(CompressedPublicKey))
                 {
-                    Debug.LogWarning($"CRITICAL KEY MISMATCH - Derived public key ({derivedPublicKey}) doesn't match stored compressed key ({CompressedPublicKey})");
-                    Debug.LogWarning("This will cause signature verification failures on relays!");
+                    Debug.Log($"KEY VALIDATION - Stored compressed public key: {CompressedPublicKey}");
                     
-                    // Update our stored compressed key to the correct one
-                    CompressedPublicKey = derivedPublicKey;
-                    
-                    // Ensure we have the uncompressed version right too
-                    if (derivedPublicKey.Length == 66 && (derivedPublicKey.StartsWith("02") || derivedPublicKey.StartsWith("03")))
+                    if (!string.Equals(derivedCompressedKey, CompressedPublicKey, StringComparison.OrdinalIgnoreCase))
                     {
-                        string newUncompressed = derivedPublicKey.Substring(2).ToLowerInvariant();
-                        Debug.Log($"KEY VALIDATION - Updating uncompressed public key from {PublicKey} to {newUncompressed}");
-                        PublicKey = newUncompressed;
+                        Debug.LogWarning($"CRITICAL KEY MISMATCH - Derived public key ({derivedCompressedKey}) doesn't match stored compressed key ({CompressedPublicKey})");
+                        Debug.LogWarning("This will cause signature verification failures on relays!");
+                        
+                        // Update our stored compressed key to the correct one
+                        CompressedPublicKey = derivedCompressedKey;
                     }
                 }
                 else
                 {
-                    Debug.Log("KEY VALIDATION - Public key matches the derived key from private key ✓");
+                    // We don't have a compressed key stored, so set it
+                    CompressedPublicKey = derivedCompressedKey;
+                    Debug.Log($"KEY VALIDATION - Setting compressed public key: {CompressedPublicKey}");
+                }
+                
+                // Ensure we have the uncompressed version correct too (this is what goes in the event)
+                if (derivedCompressedKey.Length == 66 && (derivedCompressedKey.StartsWith("02") || derivedCompressedKey.StartsWith("03")))
+                {
+                    string uncompressedKey = derivedCompressedKey.Substring(2).ToLowerInvariant();
+                    
+                    if (!string.Equals(uncompressedKey, PublicKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.LogWarning($"KEY VALIDATION - Updating uncompressed public key from {PublicKey} to {uncompressedKey}");
+                        PublicKey = uncompressedKey;
+                    }
+                    else
+                    {
+                        Debug.Log("KEY VALIDATION - Public key matches the derived key from private key ✓");
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"KEY VALIDATION - Derived compressed key has unexpected format: {derivedCompressedKey}");
                 }
             }
             catch (Exception ex)
@@ -482,6 +501,8 @@ namespace Nostr.Unity
             );
             
             Debug.Log($"Signing event with private key starting with {PrivateKey.Substring(0, 4)}...");
+            
+            // Sign the event - this should produce a canonical signature
             nostrEvent.Sign(PrivateKey);
             
             // Verify locally again before sending
@@ -492,8 +513,16 @@ namespace Nostr.Unity
             bool deepVerification = nostrEvent.DeepDebugVerification();
             Debug.Log($"EVENT VERIFICATION - Deep verification result: {deepVerification}");
             
-            Debug.Log("==== SENDING EVENT TO RELAYS ====");
-            StartCoroutine(PostTextNoteCoroutine(nostrEvent));
+            // Only send if verification passes
+            if (localVerification && deepVerification)
+            {
+                Debug.Log("==== SENDING EVENT TO RELAYS ====");
+                StartCoroutine(PostTextNoteCoroutine(nostrEvent));
+            }
+            else
+            {
+                Debug.LogError("⚠️ EVENT FAILED LOCAL VERIFICATION - NOT SENDING TO RELAYS ⚠️");
+            }
         }
         
         private IEnumerator PostTextNoteCoroutine(NostrEvent nostrEvent)

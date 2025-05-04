@@ -115,7 +115,25 @@ namespace Nostr.Unity
             
             // CRITICAL: Use the current time (UTC) for the timestamp
             // Many relays reject events with future timestamps
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            long nowInSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            
+            // Do a sanity check on the timestamp - if it's in the future by more than a day,
+            // we have a system clock issue
+            if (nowInSeconds > 1700000000 && nowInSeconds < 1900000000) // Valid range ~2023-2030
+            {
+                // Timestamp is reasonable
+                CreatedAt = nowInSeconds;
+            }
+            else
+            {
+                // System clock is likely wrong - use a hardcoded recent timestamp
+                Debug.LogWarning($"System clock appears to be invalid: {DateTimeOffset.FromUnixTimeSeconds(nowInSeconds)}");
+                
+                // Use January 1, 2023 as a safe fallback that won't be rejected
+                CreatedAt = 1672531200; // January 1, 2023
+                Debug.LogWarning($"Using fallback timestamp: {DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd")}");
+            }
+            
             Debug.Log($"TIMESTAMP DEBUG - Created event at unix timestamp: {CreatedAt} ({DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
         }
         
@@ -146,16 +164,57 @@ namespace Nostr.Unity
             // Convert the hash to hex for the event ID
             Id = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
             
-            // Generate the signature using the private key
-            string signatureHex = NostrSigner.SignEventId(Id, privateKey);
-            
-            // Ensure the signature is in canonical form (low-S value required by relays)
-            byte[] signatureBytes = NostrSigner.HexToBytes(signatureHex);
-            signatureBytes = NostrSigner.GetCanonicalSignature(signatureBytes);
-            Signature = BitConverter.ToString(signatureBytes).Replace("-", "").ToLowerInvariant();
-            
-            Debug.Log($"Generated event ID: {Id}");
-            Debug.Log($"Generated signature: {Signature}");
+            try
+            {
+                // Generate the signature directly through the NostrSigner
+                string signatureHex = NostrSigner.SignEventId(Id, privateKey);
+                Debug.Log($"Initial signature from NostrSigner: {signatureHex}");
+                
+                // Process and validate signature
+                if (signatureHex.Length != 128)
+                {
+                    Debug.LogError($"CRITICAL: Generated signature has incorrect length: {signatureHex.Length} chars, expected 128");
+                }
+                
+                // CRITICAL: Convert to byte array and explicitly ensure canonical form
+                byte[] signatureBytes = NostrSigner.HexToBytes(signatureHex);
+                byte[] canonicalSig = NostrSigner.GetCanonicalSignature(signatureBytes);
+                string canonicalHex = NostrSigner.BytesToHex(canonicalSig);
+                
+                // Record final signature
+                Signature = canonicalHex;
+                
+                // Check if canonicalization changed anything
+                if (signatureHex != canonicalHex)
+                {
+                    Debug.Log($"CANONICALIZATION: Signature was converted to canonical form");
+                    Debug.Log($"Original: {signatureHex}");
+                    Debug.Log($"Canonical: {canonicalHex}");
+                }
+                else
+                {
+                    Debug.Log("Signature was already in canonical form");
+                }
+                
+                Debug.Log($"Generated event ID: {Id}");
+                Debug.Log($"Final signature: {Signature}");
+                
+                // Double-check if the signature can be verified locally
+                if (!VerifySignature())
+                {
+                    Debug.LogError("CRITICAL ERROR: Generated signature could not be verified locally!");
+                    Debug.LogError("This will cause the event to be rejected by relays.");
+                    
+                    // Try direct verification with original methods
+                    bool directVerify = NostrSigner.VerifySignatureHex(Id, Signature, CompressedPublicKey);
+                    Debug.Log($"Direct verification result: {directVerify}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error signing event: {ex.Message}");
+                throw;
+            }
         }
         
         /// <summary>
@@ -220,7 +279,8 @@ namespace Nostr.Unity
                 
                 // Use the compressed key if available, otherwise properly construct one
                 string keyForVerification;
-                if (!string.IsNullOrEmpty(CompressedPublicKey) && CompressedPublicKey.Length == 66)
+                if (!string.IsNullOrEmpty(CompressedPublicKey) && CompressedPublicKey.Length == 66 &&
+                    (CompressedPublicKey.StartsWith("02") || CompressedPublicKey.StartsWith("03")))
                 {
                     keyForVerification = CompressedPublicKey;
                     Debug.Log($"Verifying with compressed key: {keyForVerification}");
@@ -228,9 +288,11 @@ namespace Nostr.Unity
                 else
                 {
                     // For proper verification, we need the public key in compressed format
-                    // In a production system, you should derive this properly instead of assuming
+                    // In Nostr, relays expect the public key without prefix, but for signature verification
+                    // we need the compressed format with 02/03 prefix
                     keyForVerification = "02" + PublicKey;
-                    Debug.Log($"Verifying with assumed compressed key: {keyForVerification}");
+                    Debug.LogWarning($"Using assumed compressed key with 02 prefix: {keyForVerification}");
+                    Debug.LogWarning("This might cause verification issues! Ensure you're providing the actual compressed key.");
                 }
                 
                 // IMPORTANT: Verify using the binary hash (idBytes), not the hex string

@@ -448,88 +448,94 @@ namespace Nostr.Unity.Crypto
         {
             if (signature.Length != 64)
             {
-                Debug.LogWarning($"Signature length is not 64 bytes: {signature.Length}");
+                Debug.LogError($"CRITICAL ERROR: Signature length is not 64 bytes: {signature.Length}");
                 return signature;
             }
             
-            // Extract the r and s values (32 bytes each)
-            byte[] r = new byte[32];
-            byte[] s = new byte[32];
-            Buffer.BlockCopy(signature, 0, r, 0, 32);
-            Buffer.BlockCopy(signature, 32, s, 0, 32);
-            
-            // Secp256k1 curve order (n) / 2
-            // Hex: 7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
-            byte[] nHalfBytes = HexToBytes("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0");
-            
-            // Check if s is greater than n/2 (high-S value)
-            bool highS = false;
-            for (int i = 0; i < 32; i++)
+            try
             {
-                if (s[i] > nHalfBytes[i])
+                // Extract the r and s values (32 bytes each)
+                byte[] r = new byte[32];
+                byte[] s = new byte[32];
+                Buffer.BlockCopy(signature, 0, r, 0, 32);
+                Buffer.BlockCopy(signature, 32, s, 0, 32);
+                
+                // DEBUG: Log the components
+                Debug.Log($"Signature components - R: {BytesToHex(r)}, S: {BytesToHex(s)}");
+                
+                // Secp256k1 curve order (n) / 2
+                // Hex: 7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
+                byte[] nHalfBytes = HexToBytes("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0");
+                
+                // Check if s is greater than n/2 (high-S value)
+                bool highS = false;
+                for (int i = 0; i < 32; i++)
                 {
-                    highS = true;
-                    break;
+                    if (s[i] > nHalfBytes[i])
+                    {
+                        highS = true;
+                        break;
+                    }
+                    else if (s[i] < nHalfBytes[i])
+                    {
+                        break;
+                    }
                 }
-                else if (s[i] < nHalfBytes[i])
+                
+                // If it's a high-S signature, convert to low-S
+                if (highS)
                 {
-                    break;
+                    Debug.Log("Converting high-S signature to low-S canonical form");
+                    
+                    // Create a new signature array with the same r but low-S value
+                    byte[] canonicalSignature = new byte[64];
+                    Buffer.BlockCopy(r, 0, canonicalSignature, 0, 32);
+                    
+                    // Curve order for secp256k1
+                    // Hex: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+                    byte[] curveOrderBytes = HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+                    
+                    // Create BigInteger representations - we need to be careful with byte order
+                    BigInteger curveOrder = new BigInteger(curveOrderBytes, true, true);
+                    BigInteger sValue = new BigInteger(s, true, true);
+                    
+                    // Calculate n - s
+                    BigInteger lowS = curveOrder - sValue;
+                    
+                    // Convert back to byte array with proper padding
+                    byte[] lowSBytes = lowS.ToByteArray(true, true);
+                    
+                    // Ensure it's exactly 32 bytes
+                    if (lowSBytes.Length < 32)
+                    {
+                        byte[] padded = new byte[32];
+                        Buffer.BlockCopy(lowSBytes, 0, padded, 32 - lowSBytes.Length, lowSBytes.Length);
+                        lowSBytes = padded;
+                    }
+                    else if (lowSBytes.Length > 32)
+                    {
+                        // Trim if too long (should not happen with properly formatted signatures)
+                        byte[] trimmed = new byte[32];
+                        Buffer.BlockCopy(lowSBytes, lowSBytes.Length - 32, trimmed, 0, 32);
+                        lowSBytes = trimmed;
+                    }
+                    
+                    // Copy the new S value to the canonical signature
+                    Buffer.BlockCopy(lowSBytes, 0, canonicalSignature, 32, 32);
+                    
+                    Debug.Log($"Original S: {BytesToHex(s)}");
+                    Debug.Log($"Canonical S: {BytesToHex(lowSBytes)}");
+                    
+                    return canonicalSignature;
+                }
+                else
+                {
+                    Debug.Log("Signature already has low-S value, no canonicalization needed");
                 }
             }
-            
-            // If it's a high-S signature, convert to low-S
-            if (highS)
+            catch (Exception ex)
             {
-                Debug.Log("Converting high-S signature to low-S canonical form");
-                
-                // Create a new signature array with the same r but low-S value
-                byte[] canonicalSignature = new byte[64];
-                Buffer.BlockCopy(r, 0, canonicalSignature, 0, 32);
-                
-                // Calculate n - s (curve order - s)
-                // Get curve order
-                byte[] curveOrderBytes = HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
-                // Create reversed copy for BigInteger constructor
-                byte[] curveOrderReversed = new byte[curveOrderBytes.Length];
-                Buffer.BlockCopy(curveOrderBytes, 0, curveOrderReversed, 0, curveOrderBytes.Length);
-                Array.Reverse(curveOrderReversed);
-                
-                // Get the s value
-                byte[] sReversed = new byte[s.Length];
-                Buffer.BlockCopy(s, 0, sReversed, 0, s.Length);
-                Array.Reverse(sReversed);
-                
-                // Create BigIntegers
-                BigInteger curveOrder = new BigInteger(curveOrderReversed);
-                BigInteger sValue = new BigInteger(sReversed);
-                
-                // BigInteger subtraction is defined by Subtract method
-                BigInteger lowS = curveOrder.Subtract(sValue);
-                
-                // Convert back to byte array
-                byte[] lowSBytesReversed = lowS.ToByteArray();
-                // Create a new array to reverse
-                byte[] lowSBytes = new byte[lowSBytesReversed.Length];
-                Buffer.BlockCopy(lowSBytesReversed, 0, lowSBytes, 0, lowSBytesReversed.Length);
-                Array.Reverse(lowSBytes);
-                
-                // Pad with zeros if needed
-                if (lowSBytes.Length < 32)
-                {
-                    byte[] padded = new byte[32];
-                    Buffer.BlockCopy(lowSBytes, 0, padded, 32 - lowSBytes.Length, lowSBytes.Length);
-                    lowSBytes = padded;
-                }
-                else if (lowSBytes.Length > 32)
-                {
-                    // Trim if too long
-                    byte[] trimmed = new byte[32];
-                    Buffer.BlockCopy(lowSBytes, lowSBytes.Length - 32, trimmed, 0, 32);
-                    lowSBytes = trimmed;
-                }
-                
-                Buffer.BlockCopy(lowSBytes, 0, canonicalSignature, 32, 32);
-                return canonicalSignature;
+                Debug.LogError($"Error in EnsureCanonicalSignature: {ex.Message}");
             }
             
             return signature;
