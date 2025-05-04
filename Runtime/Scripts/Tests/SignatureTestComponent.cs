@@ -156,24 +156,31 @@ public class SignatureTestComponent : MonoBehaviour
     {
         Log("--- Testing Basic Signing ---");
         
+        // Pre-allocate variables we'll need
+        string testData = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        string signature = null;
+        string publicKey = null;
+        bool verified = false;
+        bool verifiedCanonical = false;
+        string canonicalHex = null;
+        
         try
         {
             // Sign a simple hex string directly 
-            string testData = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             Log($"Test data: {testData}");
             
             // Convert to bytes
             byte[] dataBytes = NostrSigner.HexToBytes(testData);
             
             // Sign with our wrapper
-            string signature = NostrSigner.SignEventId(testData, testPrivateKey);
+            signature = NostrSigner.SignEventId(testData, testPrivateKey);
             Log($"Generated signature: {signature}");
             
             // Get the public key for verification
-            string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
+            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
             
             // Verify the signature
-            bool verified = NostrSigner.VerifySignatureHex(testData, signature, publicKey);
+            verified = NostrSigner.VerifySignatureHex(testData, signature, publicKey);
             Log($"Signature verification result: {verified}");
             
             if (!verified)
@@ -184,14 +191,14 @@ public class SignatureTestComponent : MonoBehaviour
             // Test with canonicalization explicitly
             byte[] signatureBytes = NostrSigner.HexToBytes(signature);
             byte[] canonicalSig = NostrSigner.GetCanonicalSignature(signatureBytes);
-            string canonicalHex = NostrSigner.BytesToHex(canonicalSig);
+            canonicalHex = NostrSigner.BytesToHex(canonicalSig);
             
             Log($"Original signature: {signature}");
             Log($"Canonical signature: {canonicalHex}");
             Log($"Signatures match: {signature == canonicalHex}");
             
             // Verify the canonical signature
-            bool verifiedCanonical = NostrSigner.VerifySignatureHex(testData, canonicalHex, publicKey);
+            verifiedCanonical = NostrSigner.VerifySignatureHex(testData, canonicalHex, publicKey);
             Log($"Canonical signature verification: {verifiedCanonical}");
         }
         catch (Exception ex)
@@ -209,20 +216,27 @@ public class SignatureTestComponent : MonoBehaviour
     {
         Log("--- Testing Nostr Event Signing ---");
         
+        // Pre-allocate variables we'll need
+        string publicKey = null;
+        string uncompressedPublicKey = null;
+        string content = "Test message from SignatureTestComponent";
+        string[][] tags = new string[0][];
+        NostrEvent nostrEvent = null;
+        bool verified = false;
+        bool deepVerified = false;
+        bool directVerify = false;
+        string serializedEvent = null;
+        
         try
         {
             // Get the public key for the event
-            string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-            string uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
+            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
+            uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
                 ? publicKey.Substring(2) 
                 : publicKey;
                 
-            // Create a test event
-            string content = "Test message from SignatureTestComponent";
-            string[][] tags = new string[0][];
-            
             // Create the event using the NostrEvent class
-            var nostrEvent = new NostrEvent(
+            nostrEvent = new NostrEvent(
                 uncompressedPublicKey, 
                 1, // Kind 1 = text note
                 content, 
@@ -240,7 +254,7 @@ public class SignatureTestComponent : MonoBehaviour
             Log($"Event signature: {nostrEvent.Signature}");
             
             // Verify the event signature locally
-            bool verified = nostrEvent.VerifySignature();
+            verified = nostrEvent.VerifySignature();
             Log($"Event verification result: {verified}");
             
             if (!verified)
@@ -249,15 +263,15 @@ public class SignatureTestComponent : MonoBehaviour
             }
             
             // Do a deep debug verification
-            bool deepVerified = nostrEvent.DeepDebugVerification();
+            deepVerified = nostrEvent.DeepDebugVerification();
             Log($"Deep verification result: {deepVerified}");
             
             // Get the serialized event for debugging
-            string serializedEvent = nostrEvent.SerializeComplete();
+            serializedEvent = nostrEvent.SerializeComplete();
             Log($"Complete serialized event: {serializedEvent}");
             
             // Verify with direct methods
-            bool directVerify = NostrSigner.VerifySignatureHex(
+            directVerify = NostrSigner.VerifySignatureHex(
                 nostrEvent.Id, 
                 nostrEvent.Signature, 
                 publicKey
@@ -279,21 +293,31 @@ public class SignatureTestComponent : MonoBehaviour
     {
         Log("--- Testing Relay Publishing ---");
         
+        // Pre-allocate variables we'll need outside the try
+        string publicKey = null;
+        string uncompressedPublicKey = null;
+        string timestamp = null;
+        string content = null;
+        string[][] tags = null;
+        NostrEvent nostrEvent = null;
+        bool verified = false;
+        bool published = false;
+        
         try
         {
             // Get the public key for the event
-            string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-            string uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
+            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
+            uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
                 ? publicKey.Substring(2) 
                 : publicKey;
                 
             // Create a test event with timestamp and unique content
-            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-            string content = $"Signature test message at {timestamp}";
-            string[][] tags = new string[0][];
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            content = $"Signature test message at {timestamp}";
+            tags = new string[0][];
             
             // Create the event
-            var nostrEvent = new NostrEvent(
+            nostrEvent = new NostrEvent(
                 uncompressedPublicKey, 
                 1, 
                 content, 
@@ -305,7 +329,7 @@ public class SignatureTestComponent : MonoBehaviour
             nostrEvent.Sign(testPrivateKey);
             
             // Verify locally first
-            bool verified = nostrEvent.VerifySignature();
+            verified = nostrEvent.VerifySignature();
             Log($"Local verification before sending: {verified}");
             
             if (!verified)
@@ -315,14 +339,23 @@ public class SignatureTestComponent : MonoBehaviour
             
             // Send to relay
             Log($"Sending event to relay: {relayUrl}");
-            bool published = false;
-            yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR in relay test preparation: {ex.Message}");
+            yield break; // Exit if we had an error in preparation
+        }
             
-            Log($"Relay publish result: {published}");
-            
-            // Wait a bit to get relay response
-            yield return new WaitForSeconds(2);
-            
+        // These operations involving yield must be outside the try-catch
+        yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
+        Log($"Relay publish result: {published}");
+        
+        // Wait a bit to get relay response
+        yield return new WaitForSeconds(2);
+        
+        try
+        {
+            // Process relay response
             Log("Checking relay response...");
             // Check if we have any errors or confirmations in the client
             if (_nostrClient.HasEventErrors(nostrEvent.Id, out string error))
@@ -340,8 +373,10 @@ public class SignatureTestComponent : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Log($"ERROR in relay test: {ex.Message}");
+            Log($"ERROR in relay response processing: {ex.Message}");
         }
+        
+        yield return null;
     }
     
     /// <summary>
