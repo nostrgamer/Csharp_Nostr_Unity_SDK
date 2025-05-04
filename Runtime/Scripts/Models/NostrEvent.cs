@@ -339,23 +339,37 @@ namespace Nostr.Unity
                 // Get the serialized event string that should be used for ID computation
                 string serializedEvent = GetSerializedEvent();
                 
-                // Call the debug verification to check all steps
-                bool result = NostrSigner.DebugVerifySerializedEvent(
-                    serializedEvent,
-                    Id,
-                    Signature,
-                    CompressedPublicKey ?? ("02" + PublicKey) // Use compressed key or assume it
-                );
+                // Check if the ID matches what we compute from the serialized event
+                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+                string computedId;
+                
+                using (var sha256 = SHA256.Create())
+                {
+                    computedId = BitConverter.ToString(sha256.ComputeHash(eventBytes)).Replace("-", "").ToLowerInvariant();
+                }
+                
+                bool idMatches = string.Equals(computedId, Id, StringComparison.OrdinalIgnoreCase);
+                Debug.Log($"DEEP DEBUG - ID check: {idMatches} (Computed: {computedId}, Expected: {Id})");
+                
+                if (!idMatches)
+                {
+                    Debug.LogError("CRITICAL: Event ID does not match the hash of serialized event");
+                    return false;
+                }
+                
+                // Verify the signature using the hex string method
+                string keyForVerification = CompressedPublicKey ?? ("02" + PublicKey);
+                bool sigValid = NostrSigner.VerifySignatureHex(Id, Signature, keyForVerification);
                 
                 // Log the complete process
-                Debug.Log($"DEEP DEBUG - Complete verification result: {result}");
+                Debug.Log($"DEEP DEBUG - Complete verification result: {sigValid}");
                 Debug.Log($"DEEP DEBUG - Serialized: {serializedEvent}");
                 Debug.Log($"DEEP DEBUG - ID: {Id}");
                 Debug.Log($"DEEP DEBUG - PubKey: {PublicKey}");
-                Debug.Log($"DEEP DEBUG - CompressedPubKey: {CompressedPublicKey ?? ("02" + PublicKey)}");
+                Debug.Log($"DEEP DEBUG - CompressedPubKey: {keyForVerification}");
                 Debug.Log($"DEEP DEBUG - Sig: {Signature}");
                 
-                return result;
+                return sigValid;
             }
             catch (Exception ex)
             {

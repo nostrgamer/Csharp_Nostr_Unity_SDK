@@ -14,6 +14,9 @@ namespace Nostr.Unity.Crypto
     /// </summary>
     public static class NostrSigner
     {
+        // Static BouncyCryptography instance for operations
+        private static readonly Nostr.Unity.BouncyCryptography _cryptography = new Nostr.Unity.BouncyCryptography();
+        
         /// <summary>
         /// Signs an event hash with a private key
         /// </summary>
@@ -245,83 +248,6 @@ namespace Nostr.Unity.Crypto
         }
         
         /// <summary>
-        /// Verifies a Nostr event signature (legacy method for backward compatibility)
-        /// </summary>
-        /// <param name="serializedEvent">The serialized event string</param>
-        /// <param name="signatureHex">The signature in hex format</param>
-        /// <param name="publicKeyHex">The public key in hex format</param>
-        /// <returns>True if the signature is valid, otherwise false</returns>
-        public static bool VerifySignature(string serializedEvent, string signatureHex, string publicKeyHex)
-        {
-            if (string.IsNullOrEmpty(serializedEvent))
-                throw new ArgumentException("Serialized event cannot be null or empty", nameof(serializedEvent));
-                
-            // Calculate the event ID (SHA-256 hash of the serialized event)
-            byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-            byte[] eventId;
-            using (var sha256 = SHA256.Create())
-            {
-                eventId = sha256.ComputeHash(eventBytes);
-            }
-            
-            // Call the main method with the computed hash
-            return VerifySignature(eventId, signatureHex, publicKeyHex);
-        }
-        
-        /// <summary>
-        /// Pads a byte array to exactly 32 bytes - CRITICAL for correct signature formatting
-        /// </summary>
-        private static byte[] PadTo32Bytes(byte[] input)
-        {
-            if (input.Length == 32)
-                return input;
-                
-            byte[] result = new byte[32];
-            
-            if (input.Length > 32)
-            {
-                // If it's longer than 32 bytes, take the least significant 32 bytes
-                Array.Copy(input, input.Length - 32, result, 0, 32);
-            }
-            else
-            {
-                // If it's shorter than 32 bytes, pad with zeros at the beginning
-                Array.Copy(input, 0, result, 32 - input.Length, input.Length);
-            }
-            
-            return result;
-        }
-        
-        /// <summary>
-        /// Converts a byte array to a hex string (lowercase)
-        /// </summary>
-        private static string BytesToHex(byte[] bytes)
-        {
-            StringBuilder hex = new StringBuilder(bytes.Length * 2);
-            foreach (byte b in bytes)
-                hex.AppendFormat("{0:x2}", b);
-            return hex.ToString();
-        }
-        
-        /// <summary>
-        /// Converts a hex string to a byte array
-        /// </summary>
-        private static byte[] HexToBytes(string hex)
-        {
-            if (string.IsNullOrEmpty(hex))
-                throw new ArgumentException("Hex string cannot be null or empty");
-                
-            if (hex.Length % 2 != 0)
-                throw new ArgumentException("Hex string must have an even number of characters");
-                
-            byte[] bytes = new byte[hex.Length / 2];
-            for (int i = 0; i < hex.Length; i += 2)
-                bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
-                
-            return bytes;
-        }
-        
-        /// <summary>
         /// Verifies a serialized string event and its signature for debugging purposes
         /// </summary>
         /// <param name="serializedEvent">The serialized event string</param>
@@ -370,18 +296,18 @@ namespace Nostr.Unity.Crypto
         }
 
         /// <summary>
-        /// Verifies the signature of the event
+        /// Verifies the signature of the event using hex string parameters
         /// </summary>
-        /// <param name="eventId">The event ID (hex)</param>
-        /// <param name="signatureHex">The signature (hex)</param>
-        /// <param name="publicKeyHex">The public key (hex)</param>
+        /// <param name="eventIdHex">The event ID (hex string)</param>
+        /// <param name="signatureHex">The signature (hex string)</param>
+        /// <param name="publicKeyHex">The public key (hex string)</param>
         /// <returns>True if the signature is valid, otherwise false</returns>
-        public static bool VerifySignature(string eventId, string signatureHex, string publicKeyHex)
+        public static bool VerifySignatureHex(string eventIdHex, string signatureHex, string publicKeyHex)
         {
             try
             {
                 // Ensure all inputs are in lowercase
-                eventId = eventId.ToLowerInvariant();
+                eventIdHex = eventIdHex.ToLowerInvariant();
                 signatureHex = signatureHex.ToLowerInvariant();
                 publicKeyHex = publicKeyHex.ToLowerInvariant();
                 
@@ -403,14 +329,14 @@ namespace Nostr.Unity.Crypto
                 }
                 
                 // Convert hex strings to byte arrays
-                byte[] eventIdBytes = HexToBytes(eventId);
+                byte[] eventIdBytes = HexToBytes(eventIdHex);
                 byte[] signatureBytes = HexToBytes(signatureHex);
                 byte[] publicKeyBytes = HexToBytes(publicKeyHex);
                 
                 // Ensure the signature is in canonical form (low-S value)
                 signatureBytes = EnsureCanonicalSignature(signatureBytes);
                 
-                return BouncyCryptography.VerifySignature(eventIdBytes, signatureBytes, publicKeyBytes);
+                return VerifySignature(eventIdBytes, signatureBytes, publicKeyBytes);
             }
             catch (Exception ex)
             {
@@ -419,6 +345,100 @@ namespace Nostr.Unity.Crypto
             }
         }
 
+        /// <summary>
+        /// Verifies a signature using raw byte arrays
+        /// </summary>
+        /// <param name="messageHash">The message hash (32 bytes)</param>
+        /// <param name="signature">The signature (64 bytes)</param>
+        /// <param name="publicKey">The public key (33 bytes compressed)</param>
+        /// <returns>True if verified, false otherwise</returns>
+        public static bool VerifySignature(byte[] messageHash, byte[] signature, byte[] publicKey)
+        {
+            try
+            {
+                // Use the BouncyCryptography instance to verify
+                return _cryptography.Verify(signature, messageHash, publicKey);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error in VerifySignature: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Signs a message with a private key
+        /// </summary>
+        /// <param name="messageHash">The message hash to sign (32 bytes)</param>
+        /// <param name="privateKey">The private key (32 bytes)</param>
+        /// <returns>The signature (64 bytes)</returns>
+        public static byte[] SignMessage(byte[] messageHash, byte[] privateKey)
+        {
+            try
+            {
+                // Use the BouncyCryptography instance to sign
+                return _cryptography.Sign(messageHash, privateKey);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error in SignMessage: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Pads a byte array to exactly 32 bytes - CRITICAL for correct signature formatting
+        /// </summary>
+        private static byte[] PadTo32Bytes(byte[] input)
+        {
+            if (input.Length == 32)
+                return input;
+                
+            byte[] result = new byte[32];
+            
+            if (input.Length > 32)
+            {
+                // If it's longer than 32 bytes, take the least significant 32 bytes
+                Array.Copy(input, input.Length - 32, result, 0, 32);
+            }
+            else
+            {
+                // If it's shorter than 32 bytes, pad with zeros at the beginning
+                Array.Copy(input, 0, result, 32 - input.Length, input.Length);
+            }
+            
+            return result;
+        }
+        
+        /// <summary>
+        /// Converts a byte array to a hex string (lowercase)
+        /// </summary>
+        public static string BytesToHex(byte[] bytes)
+        {
+            StringBuilder hex = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes)
+                hex.AppendFormat("{0:x2}", b);
+            return hex.ToString();
+        }
+        
+        /// <summary>
+        /// Converts a hex string to a byte array
+        /// </summary>
+        public static byte[] HexToBytes(string hex)
+        {
+            if (string.IsNullOrEmpty(hex))
+                throw new ArgumentException("Hex string cannot be null or empty");
+                
+            if (hex.Length % 2 != 0)
+                throw new ArgumentException("Hex string must have an even number of characters");
+                
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < hex.Length; i += 2)
+                bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+                
+            return bytes;
+        }
+        
         /// <summary>
         /// Ensures the signature is in canonical form (low-S value) which is required by Nostr relays
         /// </summary>
@@ -467,12 +487,31 @@ namespace Nostr.Unity.Crypto
                 Buffer.BlockCopy(r, 0, canonicalSignature, 0, 32);
                 
                 // Calculate n - s (curve order - s)
-                BigInteger curveOrder = new BigInteger(HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141").Reverse().ToArray());
-                BigInteger sValue = new BigInteger(s.Reverse().ToArray());
-                BigInteger lowS = curveOrder - sValue;
+                // Get curve order
+                byte[] curveOrderBytes = HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+                // Create reversed copy for BigInteger constructor
+                byte[] curveOrderReversed = new byte[curveOrderBytes.Length];
+                Buffer.BlockCopy(curveOrderBytes, 0, curveOrderReversed, 0, curveOrderBytes.Length);
+                Array.Reverse(curveOrderReversed);
+                
+                // Get the s value
+                byte[] sReversed = new byte[s.Length];
+                Buffer.BlockCopy(s, 0, sReversed, 0, s.Length);
+                Array.Reverse(sReversed);
+                
+                // Create BigIntegers
+                BigInteger curveOrder = new BigInteger(curveOrderReversed);
+                BigInteger sValue = new BigInteger(sReversed);
+                
+                // BigInteger subtraction is defined by Subtract method
+                BigInteger lowS = curveOrder.Subtract(sValue);
                 
                 // Convert back to byte array
-                byte[] lowSBytes = lowS.ToByteArray().Reverse().ToArray();
+                byte[] lowSBytesReversed = lowS.ToByteArray();
+                // Create a new array to reverse
+                byte[] lowSBytes = new byte[lowSBytesReversed.Length];
+                Buffer.BlockCopy(lowSBytesReversed, 0, lowSBytes, 0, lowSBytesReversed.Length);
+                Array.Reverse(lowSBytes);
                 
                 // Pad with zeros if needed
                 if (lowSBytes.Length < 32)
@@ -521,13 +560,13 @@ namespace Nostr.Unity.Crypto
                 byte[] privateKeyBytes = HexToBytes(privateKey);
                 
                 // Sign the event ID
-                byte[] signatureBytes = BouncyCryptography.SignMessage(eventIdBytes, privateKeyBytes);
+                byte[] signatureBytes = SignMessage(eventIdBytes, privateKeyBytes);
                 
                 // Ensure canonical signature (low-S value)
                 signatureBytes = EnsureCanonicalSignature(signatureBytes);
                 
                 // Convert signature bytes to hex string
-                return BitConverter.ToString(signatureBytes).Replace("-", "").ToLowerInvariant();
+                return BytesToHex(signatureBytes);
             }
             catch (Exception ex)
             {

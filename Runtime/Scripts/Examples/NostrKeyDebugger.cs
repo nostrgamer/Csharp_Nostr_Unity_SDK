@@ -33,7 +33,7 @@ namespace Nostr.Unity.Examples
             // Find NostrManager if not assigned
             if (nostrManager == null)
             {
-                nostrManager = FindObjectOfType<NostrManager>();
+                nostrManager = FindAnyObjectByType<NostrManager>();
                 if (nostrManager == null)
                 {
                     Debug.LogError("NostrManager not found in scene. Please add it to a GameObject first.");

@@ -94,7 +94,7 @@ namespace Nostr.Unity
         private void Awake()
         {
             // Properly handle NostrClient creation/discovery
-            _nostrClient = FindObjectOfType<NostrClient>();
+            _nostrClient = FindAnyObjectByType<NostrClient>();
             if (_nostrClient == null)
             {
                 // Auto-create a NostrClient GameObject
