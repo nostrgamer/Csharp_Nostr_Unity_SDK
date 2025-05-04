@@ -38,7 +38,7 @@ namespace Nostr.Unity.Crypto
                 // Convert private key from hex to bytes
                 byte[] privateKeyBytes = HexToBytes(privateKeyHex);
                 
-                // Set up the signer with deterministic k generation (important!)
+                // Set up the signer with deterministic k generation (RFC 6979) - CRITICAL for Nostr
                 var signer = new ECDsaSigner(new HMacDsaKCalculator(new Org.BouncyCastle.Crypto.Digests.Sha256Digest()));
                 
                 // Get secp256k1 curve parameters
@@ -54,9 +54,24 @@ namespace Nostr.Unity.Crypto
                 // Sign the event ID 
                 BigInteger[] signature = signer.GenerateSignature(eventId);
                 
+                // Normalize the S value to the lower half of the curve order - REQUIRED for Nostr relay acceptance
+                BigInteger n = curve.N;
+                BigInteger halfN = n.ShiftRight(1); // n/2
+                
+                BigInteger r = signature[0];
+                BigInteger s = signature[1];
+                
+                // Check if s is in the upper half of the curve order
+                if (s.CompareTo(halfN) > 0)
+                {
+                    // If so, negate s mod n
+                    s = n.Subtract(s);
+                    Debug.Log("Normalized S value to lower half of curve for canonical signature");
+                }
+                
                 // Convert to bytes and concatenate r and s
-                byte[] rBytes = PadTo32Bytes(signature[0].ToByteArrayUnsigned());
-                byte[] sBytes = PadTo32Bytes(signature[1].ToByteArrayUnsigned());
+                byte[] rBytes = PadTo32Bytes(r.ToByteArrayUnsigned());
+                byte[] sBytes = PadTo32Bytes(s.ToByteArrayUnsigned());
                 
                 // Combine r and s to form the 64-byte signature
                 byte[] sigBytes = new byte[64];
@@ -132,19 +147,54 @@ namespace Nostr.Unity.Crypto
                 var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
                 var domain = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
                 
-                // Create the public key point
-                var q = curve.Curve.DecodePoint(pubKeyBytes);
-                var keyParameters = new ECPublicKeyParameters(q, domain);
-                
-                // Set up the verifier
-                var verifier = new ECDsaSigner();
-                verifier.Init(false, keyParameters);
-                
-                // Verify the signature
-                bool result = verifier.VerifySignature(eventId, r, s);
-                Debug.Log($"NostrSigner - Verification result: {result}");
-                
-                return result;
+                try
+                {
+                    // Create the public key point
+                    var q = curve.Curve.DecodePoint(pubKeyBytes);
+                    var keyParameters = new ECPublicKeyParameters(q, domain);
+                    
+                    // Set up the verifier
+                    var verifier = new ECDsaSigner();
+                    verifier.Init(false, keyParameters);
+                    
+                    // Verify the signature
+                    bool result = verifier.VerifySignature(eventId, r, s);
+                    Debug.Log($"NostrSigner - Verification result: {result}");
+                    
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error verifying with this key: {ex.Message}");
+                    
+                    // Try with the other prefix as a last resort
+                    try
+                    {
+                        string otherPrefix = publicKeyHex.StartsWith("02") ? "03" : "02";
+                        string newPubKey = publicKeyHex.Length == 66 ? 
+                            otherPrefix + publicKeyHex.Substring(2) : 
+                            otherPrefix + publicKeyHex;
+                            
+                        Debug.LogWarning($"Attempting verification with alternate key prefix: {newPubKey}");
+                        pubKeyBytes = HexToBytes(newPubKey);
+                            
+                        var q = curve.Curve.DecodePoint(pubKeyBytes);
+                        var keyParameters = new ECPublicKeyParameters(q, domain);
+                        
+                        var verifier = new ECDsaSigner();
+                        verifier.Init(false, keyParameters);
+                        
+                        bool result = verifier.VerifySignature(eventId, r, s);
+                        Debug.Log($"NostrSigner - Verification with alternate key result: {result}");
+                        
+                        return result;
+                    }
+                    catch
+                    {
+                        // If this also fails, return false
+                        return false;
+                    }
+                }
             }
             catch (Exception ex)
             {
