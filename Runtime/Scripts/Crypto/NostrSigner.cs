@@ -368,5 +368,172 @@ namespace Nostr.Unity.Crypto
                 return false;
             }
         }
+
+        /// <summary>
+        /// Verifies the signature of the event
+        /// </summary>
+        /// <param name="eventId">The event ID (hex)</param>
+        /// <param name="signatureHex">The signature (hex)</param>
+        /// <param name="publicKeyHex">The public key (hex)</param>
+        /// <returns>True if the signature is valid, otherwise false</returns>
+        public static bool VerifySignature(string eventId, string signatureHex, string publicKeyHex)
+        {
+            try
+            {
+                // Ensure all inputs are in lowercase
+                eventId = eventId.ToLowerInvariant();
+                signatureHex = signatureHex.ToLowerInvariant();
+                publicKeyHex = publicKeyHex.ToLowerInvariant();
+                
+                // Check if pubkey starts with 02 or 03 (compressed format)
+                if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
+                {
+                    // It's already in compressed format
+                }
+                else if (publicKeyHex.Length == 64)
+                {
+                    // Assume it's an uncompressed pubkey without the 02/03 prefix
+                    // For verification we need the 02/03 prefix
+                    publicKeyHex = "02" + publicKeyHex;
+                }
+                else
+                {
+                    Debug.LogError($"Invalid public key format: {publicKeyHex}");
+                    return false;
+                }
+                
+                // Convert hex strings to byte arrays
+                byte[] eventIdBytes = HexToBytes(eventId);
+                byte[] signatureBytes = HexToBytes(signatureHex);
+                byte[] publicKeyBytes = HexToBytes(publicKeyHex);
+                
+                // Ensure the signature is in canonical form (low-S value)
+                signatureBytes = EnsureCanonicalSignature(signatureBytes);
+                
+                return BouncyCryptography.VerifySignature(eventIdBytes, signatureBytes, publicKeyBytes);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error verifying signature: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Ensures the signature is in canonical form (low-S value) which is required by Nostr relays
+        /// </summary>
+        /// <param name="signature">The signature bytes (64 bytes: r || s)</param>
+        /// <returns>The canonical signature</returns>
+        private static byte[] EnsureCanonicalSignature(byte[] signature)
+        {
+            if (signature.Length != 64)
+            {
+                Debug.LogWarning($"Signature length is not 64 bytes: {signature.Length}");
+                return signature;
+            }
+            
+            // Extract the r and s values (32 bytes each)
+            byte[] r = new byte[32];
+            byte[] s = new byte[32];
+            Buffer.BlockCopy(signature, 0, r, 0, 32);
+            Buffer.BlockCopy(signature, 32, s, 0, 32);
+            
+            // Secp256k1 curve order (n) / 2
+            // Hex: 7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
+            byte[] nHalfBytes = HexToBytes("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0");
+            
+            // Check if s is greater than n/2 (high-S value)
+            bool highS = false;
+            for (int i = 0; i < 32; i++)
+            {
+                if (s[i] > nHalfBytes[i])
+                {
+                    highS = true;
+                    break;
+                }
+                else if (s[i] < nHalfBytes[i])
+                {
+                    break;
+                }
+            }
+            
+            // If it's a high-S signature, convert to low-S
+            if (highS)
+            {
+                Debug.Log("Converting high-S signature to low-S canonical form");
+                
+                // Create a new signature array with the same r but low-S value
+                byte[] canonicalSignature = new byte[64];
+                Buffer.BlockCopy(r, 0, canonicalSignature, 0, 32);
+                
+                // Calculate n - s (curve order - s)
+                BigInteger curveOrder = new BigInteger(HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141").Reverse().ToArray());
+                BigInteger sValue = new BigInteger(s.Reverse().ToArray());
+                BigInteger lowS = curveOrder - sValue;
+                
+                // Convert back to byte array
+                byte[] lowSBytes = lowS.ToByteArray().Reverse().ToArray();
+                
+                // Pad with zeros if needed
+                if (lowSBytes.Length < 32)
+                {
+                    byte[] padded = new byte[32];
+                    Buffer.BlockCopy(lowSBytes, 0, padded, 32 - lowSBytes.Length, lowSBytes.Length);
+                    lowSBytes = padded;
+                }
+                else if (lowSBytes.Length > 32)
+                {
+                    // Trim if too long
+                    byte[] trimmed = new byte[32];
+                    Buffer.BlockCopy(lowSBytes, lowSBytes.Length - 32, trimmed, 0, 32);
+                    lowSBytes = trimmed;
+                }
+                
+                Buffer.BlockCopy(lowSBytes, 0, canonicalSignature, 32, 32);
+                return canonicalSignature;
+            }
+            
+            return signature;
+        }
+
+        /// <summary>
+        /// Ensures the signature is in canonical form (low-S value) which is required by Nostr relays
+        /// </summary>
+        /// <param name="signature">The signature bytes (64 bytes: r || s)</param>
+        /// <returns>The canonical signature</returns>
+        public static byte[] GetCanonicalSignature(byte[] signature)
+        {
+            return EnsureCanonicalSignature(signature);
+        }
+
+        /// <summary>
+        /// Signs the event ID with a private key
+        /// </summary>
+        /// <param name="eventId">The event ID (hex string)</param>
+        /// <param name="privateKey">The private key (hex string)</param>
+        /// <returns>The signature (hex string)</returns>
+        public static string SignEventId(string eventId, string privateKey)
+        {
+            try
+            {
+                // Convert hex strings to byte arrays
+                byte[] eventIdBytes = HexToBytes(eventId);
+                byte[] privateKeyBytes = HexToBytes(privateKey);
+                
+                // Sign the event ID
+                byte[] signatureBytes = BouncyCryptography.SignMessage(eventIdBytes, privateKeyBytes);
+                
+                // Ensure canonical signature (low-S value)
+                signatureBytes = EnsureCanonicalSignature(signatureBytes);
+                
+                // Convert signature bytes to hex string
+                return BitConverter.ToString(signatureBytes).Replace("-", "").ToLowerInvariant();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error signing event ID: {ex.Message}");
+                throw;
+            }
+        }
     }
 } 

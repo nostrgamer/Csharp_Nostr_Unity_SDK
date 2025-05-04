@@ -137,45 +137,25 @@ namespace Nostr.Unity
             
             // Compute the event ID as a hash of the serialized event
             byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-            
-            // Show raw bytes for debugging
-            Debug.Log($"HASH DEBUG - UTF8 bytes ({eventBytes.Length} bytes): {BitConverter.ToString(eventBytes).Replace("-", " ")}");
-            
             byte[] hashBytes;
             using (var sha256 = SHA256.Create())
             {
                 hashBytes = sha256.ComputeHash(eventBytes);
             }
             
-            // Show the binary hash for debugging
-            Debug.Log($"HASH DEBUG - Binary hash (32 bytes): {BitConverter.ToString(hashBytes).Replace("-", " ")}");
-            
-            // Store the binary hash for signing
-            byte[] idBytes = hashBytes;
-            
-            // Convert the hash to hex string for the JSON id field
+            // Convert the hash to hex for the event ID
             Id = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-            Debug.Log($"Computed event ID: {Id}");
             
-            // IMPORTANT: Sign the actual 32-byte hash (idBytes), not the hex string
-            Signature = NostrSigner.SignEvent(idBytes, privateKey);
+            // Generate the signature using the private key
+            string signatureHex = NostrSigner.SignEventId(Id, privateKey);
             
-            // Log event details for debugging
-            string completeEvent = SerializeComplete();
-            Debug.Log($"Complete event: {completeEvent}");
-            Debug.Log($"Event ID: {Id}");
-            Debug.Log($"Public Key: {PublicKey}");
-            Debug.Log($"Signature: {Signature}");
+            // Ensure the signature is in canonical form (low-S value required by relays)
+            byte[] signatureBytes = NostrSigner.HexToBytes(signatureHex);
+            signatureBytes = NostrSigner.GetCanonicalSignature(signatureBytes);
+            Signature = BitConverter.ToString(signatureBytes).Replace("-", "").ToLowerInvariant();
             
-            // Verify signature immediately for debugging
-            bool verified = VerifySignature();
-            Debug.Log($"DEBUG - Local signature verification: {verified}");
-            
-            // Triple check: Verify the event against a reference implementation's expected hash
-            string manualId = ComputeManualId(serializedEvent);
-            bool idsMatch = string.Equals(Id, manualId, StringComparison.OrdinalIgnoreCase);
-            Debug.Log($"HASH VALIDATION - Manual ID calculation: {manualId}");
-            Debug.Log($"HASH VALIDATION - IDs match: {idsMatch}");
+            Debug.Log($"Generated event ID: {Id}");
+            Debug.Log($"Generated signature: {Signature}");
         }
         
         /// <summary>
