@@ -419,15 +419,51 @@ namespace Nostr.Unity
                 return;
             }
             
+            // Ensure private key is exactly 64 hex chars (32 bytes)
+            if (PrivateKey.Length != 64 || !IsValidHexString(PrivateKey))
+            {
+                Debug.LogError($"Private key is not in the correct format. Expected 64 hex chars.");
+                return;
+            }
+            
+            // Validate keys match - the public key should be derived from the private key
+            try
+            {
+                string derivedPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                if (!string.IsNullOrEmpty(CompressedPublicKey) && 
+                    !string.Equals(derivedPublicKey, CompressedPublicKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.LogWarning($"Derived public key ({derivedPublicKey}) doesn't match stored compressed key ({CompressedPublicKey})");
+                    // Update our stored compressed key to the correct one
+                    CompressedPublicKey = derivedPublicKey;
+                    // Ensure we have the uncompressed version right too
+                    if (derivedPublicKey.Length == 66 && (derivedPublicKey.StartsWith("02") || derivedPublicKey.StartsWith("03")))
+                    {
+                        PublicKey = derivedPublicKey.Substring(2).ToLowerInvariant();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error validating key pair: {ex.Message}");
+                // Continue anyway - the keys might still work
+            }
+            
+            // Create event tags - empty for a simple text note
+            string[][] tags = Array.Empty<string[]>();
+            
+            Debug.Log($"Creating note with public key: {PublicKey} (compressed: {CompressedPublicKey})");
+            
             // Pass both the standard public key (for the relay) and the compressed version (for verification)
             var nostrEvent = new NostrEvent(
                 PublicKey, 
                 (int)NostrEventKind.TextNote, 
                 content, 
-                Array.Empty<string[]>(),
+                tags,
                 CompressedPublicKey  // Pass the compressed key for verification
             );
             
+            Debug.Log($"Signing event with private key starting with {PrivateKey.Substring(0, 4)}...");
             nostrEvent.Sign(PrivateKey);
             
             StartCoroutine(PostTextNoteCoroutine(nostrEvent));
@@ -435,16 +471,17 @@ namespace Nostr.Unity
         
         private IEnumerator PostTextNoteCoroutine(NostrEvent nostrEvent)
         {
+            Debug.Log($"Publishing event ID: {nostrEvent.Id}");
             bool published = false;
             yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
             
             if (published)
             {
-                Debug.Log("Note published successfully");
+                Debug.Log($"Note published successfully with ID: {nostrEvent.Id}");
             }
             else
             {
-                Debug.LogError("Failed to publish note");
+                Debug.LogError($"Failed to publish note with ID: {nostrEvent.Id}");
             }
         }
         

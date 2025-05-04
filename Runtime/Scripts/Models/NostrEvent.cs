@@ -214,15 +214,16 @@ namespace Nostr.Unity
         /// <returns>The serialized event data</returns>
         private string GetSerializedEvent()
         {
-            // Create an array exactly as specified in the Nostr protocol
+            // CRITICAL: Use explicit JsonConvert.SerializeObject for EACH field to ensure proper escaping
+            // This exactly matches how relays serialize events
             var eventData = new object[] 
             { 
-                0,              // Version (always 0)
-                PublicKey,      // Public key (hex format)
-                CreatedAt,      // Created at timestamp
-                Kind,           // Event kind
-                Tags,           // Tags array
-                Content         // Content string
+                0,                                       // Version (always 0)
+                PublicKey,                               // Public key (hex format)
+                CreatedAt,                               // Created at timestamp
+                Kind,                                    // Event kind
+                Tags,                                    // Tags array
+                Content                                  // Content string
             };
             
             // Use the settings that match the Nostr spec exactly

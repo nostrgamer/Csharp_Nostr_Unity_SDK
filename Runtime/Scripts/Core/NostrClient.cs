@@ -187,20 +187,29 @@ namespace Nostr.Unity
                 throw new ArgumentException("Event ID cannot be null or empty", nameof(nostrEvent));
             if (string.IsNullOrEmpty(nostrEvent.Signature))
                 throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
+                
+            // Double-check signature before sending
             if (!nostrEvent.VerifySignature())
+            {
+                Debug.LogError("⚠️ Event signature verification failed - relays will reject this event!");
+                Debug.LogError("This usually means the private key doesn't match the public key used in the event.");
                 throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
+            }
+            
+            Debug.Log($"Publishing event with ID: {nostrEvent.Id}");
+            Debug.Log($"Event public key: {nostrEvent.PublicKey}");
             
             string jsonMessage = null;
             
             try
             {
-                // Parse the event into a JObject for proper structure
-                JObject eventObject = JObject.Parse(nostrEvent.SerializeComplete());
+                // Use the serialized complete event directly for proper JSON structure
+                string eventJson = nostrEvent.SerializeComplete();
                 
                 // Create the proper Nostr message array: ["EVENT", {event}]
                 JArray message = new JArray();
                 message.Add("EVENT");
-                message.Add(eventObject);
+                message.Add(JObject.Parse(eventJson));
                 
                 jsonMessage = message.ToString(Formatting.None);
                 Debug.Log($"Publishing event message: {jsonMessage}");
@@ -223,6 +232,7 @@ namespace Nostr.Unity
                         Task sendTask = null;
                         try
                         {
+                            Debug.Log($"Sending event to relay with WebSocket state: {webSocket.State}");
                             sendTask = webSocket.SendAsync(
                                 new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), 
                                 WebSocketMessageType.Text, 
@@ -240,10 +250,24 @@ namespace Nostr.Unity
                         if (sendTask != null)
                         {
                             yield return sendTask.AsCoroutine();
+                            Debug.Log($"Sent event to relay");
                             success = true;
                         }
                     }
+                    else
+                    {
+                        Debug.LogWarning($"Cannot send to relay - WebSocket state is {webSocket.State}");
+                    }
                 }
+            }
+            
+            if (success)
+            {
+                Debug.Log($"Event {nostrEvent.Id} published to at least one relay");
+            }
+            else
+            {
+                Debug.LogError($"Failed to publish event {nostrEvent.Id} to any relay");
             }
             
             onComplete?.Invoke(success);
