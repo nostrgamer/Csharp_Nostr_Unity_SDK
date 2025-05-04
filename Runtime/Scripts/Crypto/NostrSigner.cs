@@ -306,6 +306,25 @@ namespace Nostr.Unity.Crypto
         {
             try
             {
+                // Ensure all parameters are valid
+                if (string.IsNullOrEmpty(eventIdHex) || eventIdHex.Length != 64)
+                {
+                    Debug.LogError($"Invalid event ID format: {eventIdHex}");
+                    return false;
+                }
+                
+                if (string.IsNullOrEmpty(signatureHex) || signatureHex.Length != 128)
+                {
+                    Debug.LogError($"Invalid signature format: {signatureHex}, length: {signatureHex?.Length ?? 0}");
+                    return false;
+                }
+                
+                if (string.IsNullOrEmpty(publicKeyHex))
+                {
+                    Debug.LogError("Public key cannot be null or empty");
+                    return false;
+                }
+                
                 // Ensure all inputs are in lowercase
                 eventIdHex = eventIdHex.ToLowerInvariant();
                 signatureHex = signatureHex.ToLowerInvariant();
@@ -314,17 +333,19 @@ namespace Nostr.Unity.Crypto
                 // Check if pubkey starts with 02 or 03 (compressed format)
                 if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
                 {
-                    // It's already in compressed format
+                    // It's already in compressed format, proceed
+                    Debug.Log($"Using compressed public key for verification: {publicKeyHex}");
                 }
                 else if (publicKeyHex.Length == 64)
                 {
                     // Assume it's an uncompressed pubkey without the 02/03 prefix
-                    // For verification we need the 02/03 prefix
+                    // Try both 02 and 03 prefix since we don't know which is correct
+                    Debug.LogWarning($"Public key missing compression prefix, trying with 02 prefix: 02{publicKeyHex}");
                     publicKeyHex = "02" + publicKeyHex;
                 }
                 else
                 {
-                    Debug.LogError($"Invalid public key format: {publicKeyHex}");
+                    Debug.LogError($"Invalid public key format: {publicKeyHex}, length: {publicKeyHex.Length}");
                     return false;
                 }
                 
@@ -333,14 +354,87 @@ namespace Nostr.Unity.Crypto
                 byte[] signatureBytes = HexToBytes(signatureHex);
                 byte[] publicKeyBytes = HexToBytes(publicKeyHex);
                 
-                // Ensure the signature is in canonical form (low-S value)
-                signatureBytes = EnsureCanonicalSignature(signatureBytes);
+                if (signatureBytes.Length != 64)
+                {
+                    Debug.LogError($"Decoded signature has invalid length: {signatureBytes.Length} bytes, expected 64");
+                    return false;
+                }
                 
-                return VerifySignature(eventIdBytes, signatureBytes, publicKeyBytes);
+                // Extract r and s components from signature
+                byte[] rBytes = new byte[32];
+                byte[] sBytes = new byte[32];
+                Buffer.BlockCopy(signatureBytes, 0, rBytes, 0, 32);
+                Buffer.BlockCopy(signatureBytes, 32, sBytes, 0, 32);
+                
+                // Convert to BigIntegers
+                var r = new Org.BouncyCastle.Math.BigInteger(1, rBytes);
+                var s = new Org.BouncyCastle.Math.BigInteger(1, sBytes);
+                
+                // Get the secp256k1 curve
+                var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                var domain = new Org.BouncyCastle.Crypto.Parameters.ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
+                
+                // Validate s is in canonical form (low-S value)
+                var n = curve.N;
+                var halfN = n.ShiftRight(1);
+                if (s.CompareTo(halfN) > 0)
+                {
+                    Debug.LogWarning("Signature uses high-S value, some Nostr relays may reject this");
+                }
+                
+                try
+                {
+                    // Create the public key point
+                    var point = curve.Curve.DecodePoint(publicKeyBytes);
+                    var pubKeyParams = new Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters(point, domain);
+                    
+                    // Set up the verifier
+                    var verifier = new Org.BouncyCastle.Crypto.Signers.ECDsaSigner();
+                    verifier.Init(false, pubKeyParams);
+                    
+                    // Verify the signature against the binary event ID
+                    bool result = verifier.VerifySignature(eventIdBytes, r, s);
+                    Debug.Log($"Verification result: {result}");
+                    
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error in primary verification: {ex.Message}");
+                    
+                    // If the 02 prefix failed, try with 03 prefix
+                    if (publicKeyHex.StartsWith("02") && publicKeyHex.Length == 66)
+                    {
+                        try
+                        {
+                            Debug.LogWarning("Trying alternate public key prefix (03)");
+                            string altPublicKeyHex = "03" + publicKeyHex.Substring(2);
+                            byte[] altPublicKeyBytes = HexToBytes(altPublicKeyHex);
+                            
+                            var point = curve.Curve.DecodePoint(altPublicKeyBytes);
+                            var pubKeyParams = new Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters(point, domain);
+                            
+                            var verifier = new Org.BouncyCastle.Crypto.Signers.ECDsaSigner();
+                            verifier.Init(false, pubKeyParams);
+                            
+                            bool result = verifier.VerifySignature(eventIdBytes, r, s);
+                            Debug.Log($"Alternate verification result: {result}");
+                            
+                            return result;
+                        }
+                        catch (Exception altEx)
+                        {
+                            Debug.LogError($"Error in alternate verification: {altEx.Message}");
+                            return false;
+                        }
+                    }
+                    
+                    return false;
+                }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error verifying signature: {ex.Message}");
+                Debug.LogError($"Error in VerifySignatureHex: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
         }
@@ -561,22 +655,91 @@ namespace Nostr.Unity.Crypto
         {
             try
             {
+                // Ensure inputs are valid
+                if (string.IsNullOrEmpty(eventId) || eventId.Length != 64)
+                    throw new ArgumentException("Event ID must be exactly 64 characters", nameof(eventId));
+                    
+                if (string.IsNullOrEmpty(privateKey) || privateKey.Length != 64)
+                    throw new ArgumentException("Private key must be exactly 64 characters", nameof(privateKey));
+                
                 // Convert hex strings to byte arrays
                 byte[] eventIdBytes = HexToBytes(eventId);
                 byte[] privateKeyBytes = HexToBytes(privateKey);
                 
+                // Get the secp256k1 curve parameters
+                var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                var domain = new Org.BouncyCastle.Crypto.Parameters.ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
+                
+                // Create the private key parameter
+                var privKeyParams = new Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters(
+                    new Org.BouncyCastle.Math.BigInteger(1, privateKeyBytes), domain);
+                
+                // Use deterministic ECDSA (RFC 6979) - this is critical for Nostr
+                var signer = new Org.BouncyCastle.Crypto.Signers.ECDsaSigner(
+                    new Org.BouncyCastle.Crypto.Signers.HMacDsaKCalculator(
+                        new Org.BouncyCastle.Crypto.Digests.Sha256Digest()));
+                        
+                signer.Init(true, privKeyParams);
+                
                 // Sign the event ID
-                byte[] signatureBytes = SignMessage(eventIdBytes, privateKeyBytes);
+                Org.BouncyCastle.Math.BigInteger[] signature = signer.GenerateSignature(eventIdBytes);
+                Org.BouncyCastle.Math.BigInteger r = signature[0];
+                Org.BouncyCastle.Math.BigInteger s = signature[1];
                 
-                // Ensure canonical signature (low-S value)
-                signatureBytes = EnsureCanonicalSignature(signatureBytes);
+                // CRITICAL: Normalize S value to lower half of curve as per BIP-0062
+                Org.BouncyCastle.Math.BigInteger n = curve.N;
+                Org.BouncyCastle.Math.BigInteger halfN = n.ShiftRight(1);
                 
-                // Convert signature bytes to hex string
-                return BytesToHex(signatureBytes);
+                // If s > n/2, set s = n - s (this creates an equivalent but canonical signature)
+                if (s.CompareTo(halfN) > 0)
+                {
+                    s = n.Subtract(s);
+                    Debug.Log("Normalized S value to low-S form for canonical signature");
+                }
+                
+                // Combine r and s into a 64-byte signature
+                byte[] rBytes = r.ToByteArrayUnsigned();
+                byte[] sBytes = s.ToByteArrayUnsigned();
+                
+                // Create a properly padded 64-byte signature
+                byte[] sigBytes = new byte[64];
+                
+                // Ensure r and s are exactly 32 bytes with proper padding
+                if (rBytes.Length < 32)
+                {
+                    // Pad with zeros at the beginning
+                    Buffer.BlockCopy(rBytes, 0, sigBytes, 32 - rBytes.Length, rBytes.Length);
+                }
+                else
+                {
+                    // Copy the least significant 32 bytes if larger
+                    Buffer.BlockCopy(rBytes, Math.Max(0, rBytes.Length - 32), sigBytes, 0, Math.Min(32, rBytes.Length));
+                }
+                
+                if (sBytes.Length < 32)
+                {
+                    // Pad with zeros at the beginning
+                    Buffer.BlockCopy(sBytes, 0, sigBytes, 64 - sBytes.Length, sBytes.Length);
+                }
+                else
+                {
+                    // Copy the least significant 32 bytes if larger
+                    Buffer.BlockCopy(sBytes, Math.Max(0, sBytes.Length - 32), sigBytes, 32, Math.Min(32, sBytes.Length));
+                }
+                
+                string signatureHex = BytesToHex(sigBytes).ToLowerInvariant();
+                
+                // Double check signature length
+                if (signatureHex.Length != 128)
+                {
+                    throw new InvalidOperationException($"Generated signature has incorrect length: {signatureHex.Length}, expected 128");
+                }
+                
+                return signatureHex;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error signing event ID: {ex.Message}");
+                Debug.LogError($"Error signing event ID: {ex.Message}\n{ex.StackTrace}");
                 throw;
             }
         }

@@ -1,13 +1,14 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Networking;
 using Newtonsoft.Json;
 using Nostr.Unity.Utils;
-using System.Collections;
 using Newtonsoft.Json.Linq;
 
 namespace Nostr.Unity
@@ -24,6 +25,9 @@ namespace Nostr.Unity
         
         private const int RECONNECT_DELAY_MS = 5000;
         private const int MAX_RECONNECT_ATTEMPTS = 3;
+        
+        // Dictionary to track event publishing errors
+        private Dictionary<string, string> _eventErrors = new Dictionary<string, string>();
         
         /// <summary>
         /// Event triggered when a new event is received from a relay
@@ -585,52 +589,34 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Handles OK messages received from relays (event publish confirmations)
+        /// Handles "OK" messages from the relay
         /// </summary>
-        /// <param name="messageArray">The message array from the relay</param>
-        /// <param name="relayUrl">The URL of the relay that sent the message</param>
-        private void HandleOkMessage(object[] messageArray, string relayUrl)
+        private void HandleOkMessage(object[] okMessage, string relayUrl)
         {
-            try
+            if (okMessage.Length < 3)
             {
-                if (messageArray.Length < 3)
-                {
-                    Debug.LogWarning($"Invalid OK message format from {relayUrl}");
-                    return;
-                }
-                
-                string eventId = messageArray[1]?.ToString();
-                bool accepted = false;
-                
-                // The third element is a boolean indicating if the event was accepted
-                if (messageArray[2] != null)
-                {
-                    // Convert to bool - could be a bool or a string "true"/"false"
-                    if (messageArray[2] is bool boolValue)
-                    {
-                        accepted = boolValue;
-                    }
-                    else
-                    {
-                        bool.TryParse(messageArray[2].ToString(), out accepted);
-                    }
-                }
-                
-                string message = accepted ? 
-                    $"Event {eventId} was accepted by {relayUrl}" : 
-                    $"Event {eventId} was rejected by {relayUrl}";
-                
-                if (messageArray.Length >= 4 && messageArray[3] != null)
-                {
-                    // The fourth element is an optional message
-                    message += $": {messageArray[3]}";
-                }
-                
-                Debug.Log(message);
+                Debug.LogWarning($"Received invalid OK message format from {relayUrl}");
+                return;
             }
-            catch (Exception ex)
+            
+            string eventId = okMessage[1]?.ToString();
+            bool success = okMessage[2]?.ToString() == "true";
+            string errorMessage = okMessage.Length > 3 ? okMessage[3]?.ToString() : null;
+            
+            if (success)
             {
-                Debug.LogError($"Error handling OK message from {relayUrl}: {ex.Message}");
+                Debug.Log($"Event {eventId} successfully published to {relayUrl}");
+                // Remove any previous errors for this event
+                if (_eventErrors.ContainsKey(eventId))
+                {
+                    _eventErrors.Remove(eventId);
+                }
+            }
+            else
+            {
+                Debug.Log($"Event {eventId} was rejected by {relayUrl}: {errorMessage}");
+                // Store the error for this event
+                _eventErrors[eventId] = $"Rejected by {relayUrl}: {errorMessage}";
             }
         }
         
@@ -652,6 +638,23 @@ namespace Nostr.Unity
                     Debug.LogError($"Failed to send message to relay: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Checks if an event has encountered errors during publishing
+        /// </summary>
+        /// <param name="eventId">The ID of the event to check</param>
+        /// <param name="error">Returns the error message if any</param>
+        /// <returns>True if the event has errors, otherwise false</returns>
+        public bool HasEventErrors(string eventId, out string error)
+        {
+            if (_eventErrors.TryGetValue(eventId, out error))
+            {
+                return true;
+            }
+            
+            error = null;
+            return false;
         }
     }
     
