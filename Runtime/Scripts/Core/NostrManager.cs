@@ -419,7 +419,15 @@ namespace Nostr.Unity
                 return;
             }
             
-            var nostrEvent = new NostrEvent(PublicKey, (int)NostrEventKind.TextNote, content, Array.Empty<string[]>());
+            // Pass both the standard public key (for the relay) and the compressed version (for verification)
+            var nostrEvent = new NostrEvent(
+                PublicKey, 
+                (int)NostrEventKind.TextNote, 
+                content, 
+                Array.Empty<string[]>(),
+                CompressedPublicKey  // Pass the compressed key for verification
+            );
+            
             nostrEvent.Sign(PrivateKey);
             
             StartCoroutine(PostTextNoteCoroutine(nostrEvent));

@@ -8,6 +8,7 @@ using UnityEngine;
 using Newtonsoft.Json;
 using Nostr.Unity.Utils;
 using System.Collections;
+using Newtonsoft.Json.Linq;
 
 namespace Nostr.Unity
 {
@@ -188,27 +189,63 @@ namespace Nostr.Unity
                 throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
             if (!nostrEvent.VerifySignature())
                 throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
-            var eventMessage = new object[] { "EVENT", nostrEvent };
-            string jsonMessage = JsonConvert.SerializeObject(eventMessage);
-            foreach (var webSocket in _webSockets)
+            
+            string jsonMessage = null;
+            
+            try
             {
-                if (webSocket.State == WebSocketState.Open)
+                // Parse the event into a JObject for proper structure
+                JObject eventObject = JObject.Parse(nostrEvent.SerializeComplete());
+                
+                // Create the proper Nostr message array: ["EVENT", {event}]
+                JArray message = new JArray();
+                message.Add("EVENT");
+                message.Add(eventObject);
+                
+                jsonMessage = message.ToString(Formatting.None);
+                Debug.Log($"Publishing event message: {jsonMessage}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error preparing event for publication: {ex.Message}");
+                Error?.Invoke(this, $"Failed to prepare event: {ex.Message}");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+            
+            // Now send the message to all relays outside the try-catch
+            if (!string.IsNullOrEmpty(jsonMessage))
+            {
+                foreach (var webSocket in _webSockets)
                 {
-                    Task sendTask = null;
-                    try
+                    if (webSocket.State == WebSocketState.Open)
                     {
-                        sendTask = webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+                        Task sendTask = null;
+                        try
+                        {
+                            sendTask = webSocket.SendAsync(
+                                new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), 
+                                WebSocketMessageType.Text, 
+                                true, 
+                                _cancellationTokenSource.Token);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Failed to start sending event to relay: {ex.Message}");
+                            Error?.Invoke(this, $"Failed to send event: {ex.Message}");
+                            continue;
+                        }
+                        
+                        // Now the yield is outside of any try-catch
+                        if (sendTask != null)
+                        {
+                            yield return sendTask.AsCoroutine();
+                            success = true;
+                        }
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"Failed to start sending event to relay: {ex.Message}");
-                        Error?.Invoke(this, $"Failed to send event: {ex.Message}");
-                        continue;
-                    }
-                    yield return sendTask.AsCoroutine();
-                    success = true;
                 }
             }
+            
             onComplete?.Invoke(success);
         }
         
