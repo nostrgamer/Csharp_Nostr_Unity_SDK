@@ -221,26 +221,20 @@ namespace Nostr.Unity
         /// <returns>The serialized event data</returns>
         private string GetSerializedEvent()
         {
-            // CRITICAL: Use explicit JsonConvert.SerializeObject for EACH field to ensure proper escaping
-            // This exactly matches how relays serialize events
-            var eventData = new object[] 
-            { 
-                0,                                       // Version (always 0)
-                PublicKey,                               // Public key (hex format)
-                CreatedAt,                               // Created at timestamp
-                Kind,                                    // Event kind
-                Tags,                                    // Tags array
-                Content                                  // Content string
-            };
+            // The proper way to serialize for ID computation is to:
+            // 1. Create an array of [0, pubkey, created_at, kind, tags, content]
+            // 2. JSON encode the ENTIRE array with proper escaping
+
+            // Convert each field to its proper JSON representation
+            string serializedPubkey = JsonConvert.SerializeObject(PublicKey);
+            string serializedContent = JsonConvert.SerializeObject(Content);
+            string serializedTags = JsonConvert.SerializeObject(Tags);
             
-            // Use the settings that match the Nostr spec exactly
-            var settings = new JsonSerializerSettings
-            {
-                Formatting = Formatting.None,
-                NullValueHandling = NullValueHandling.Include
-            };
+            // Format the array manually to ensure proper structure
+            // This follows the exact NIP-01 serialization requirement
+            string serialized = $"[0,{serializedPubkey},{CreatedAt},{Kind},{serializedTags},{serializedContent}]";
             
-            return JsonConvert.SerializeObject(eventData, settings);
+            return serialized;
         }
         
         /// <summary>
