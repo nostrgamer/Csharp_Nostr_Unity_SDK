@@ -15,23 +15,23 @@ namespace Nostr.Unity.Crypto
     public static class NostrSigner
     {
         /// <summary>
-        /// Signs an event ID according to the Nostr specification
+        /// Signs an event hash with a private key
         /// </summary>
-        public static string SignEvent(string serializedEvent, string privateKeyHex)
+        /// <param name="eventId">The binary 32-byte event ID (SHA-256 hash of the serialized event)</param>
+        /// <param name="privateKeyHex">The private key in hex format</param>
+        /// <returns>The signature as a hex string</returns>
+        public static string SignEvent(byte[] eventId, string privateKeyHex)
         {
             try
             {
-                Debug.Log($"NostrSigner - Signing event: {serializedEvent}");
-                
-                // Calculate the event ID (SHA-256 hash of the serialized event)
-                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-                byte[] eventId;
-                using (var sha256 = SHA256.Create())
+                if (eventId == null || eventId.Length != 32)
                 {
-                    eventId = sha256.ComputeHash(eventBytes);
+                    throw new ArgumentException("Event ID must be exactly 32 bytes", nameof(eventId));
                 }
                 
-                // Convert to hex for debugging
+                Debug.Log($"NostrSigner - Signing event ID (binary, 32 bytes)");
+                
+                // Convert event ID bytes to hex for debugging
                 string eventIdHex = BytesToHex(eventId);
                 Debug.Log($"NostrSigner - Event ID (hex): {eventIdHex}");
                 
@@ -54,7 +54,7 @@ namespace Nostr.Unity.Crypto
                 // Initialize the signer
                 signer.Init(true, keyParameters);
                 
-                // Sign the event ID directly (not a hash of it - eventId is already a hash)
+                // Sign the event ID directly
                 BigInteger[] signature = signer.GenerateSignature(eventId);
                 
                 // Extract r and s values for normalization
@@ -96,19 +96,49 @@ namespace Nostr.Unity.Crypto
         }
         
         /// <summary>
+        /// Signs a serialized event string with a private key (legacy method for backward compatibility)
+        /// </summary>
+        /// <param name="serializedEvent">The serialized event string to hash and sign</param>
+        /// <param name="privateKeyHex">The private key in hex format</param>
+        /// <returns>The signature as a hex string</returns>
+        public static string SignEvent(string serializedEvent, string privateKeyHex)
+        {
+            if (string.IsNullOrEmpty(serializedEvent))
+                throw new ArgumentException("Serialized event cannot be null or empty", nameof(serializedEvent));
+                
+            Debug.Log($"NostrSigner - Computing hash of serialized event: {serializedEvent}");
+            
+            // Calculate the event ID (SHA-256 hash of the serialized event)
+            byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+            byte[] eventId;
+            using (var sha256 = SHA256.Create())
+            {
+                eventId = sha256.ComputeHash(eventBytes);
+            }
+            
+            // Call the main method with the computed hash
+            return SignEvent(eventId, privateKeyHex);
+        }
+        
+        /// <summary>
         /// Verifies a Nostr event signature
         /// </summary>
-        public static bool VerifySignature(string serializedEvent, string signatureHex, string publicKeyHex)
+        /// <param name="eventId">The binary 32-byte event ID (SHA-256 hash of the serialized event)</param>
+        /// <param name="signatureHex">The signature in hex format</param>
+        /// <param name="publicKeyHex">The public key in hex format</param>
+        /// <returns>True if the signature is valid, otherwise false</returns>
+        public static bool VerifySignature(byte[] eventId, string signatureHex, string publicKeyHex)
         {
             try
             {
-                // Calculate the event ID (SHA-256 hash of the serialized event)
-                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-                byte[] eventId;
-                using (var sha256 = SHA256.Create())
+                if (eventId == null || eventId.Length != 32)
                 {
-                    eventId = sha256.ComputeHash(eventBytes);
+                    throw new ArgumentException("Event ID must be exactly 32 bytes", nameof(eventId));
                 }
+                
+                // Convert event ID bytes to hex for debugging
+                string eventIdHex = BytesToHex(eventId);
+                Debug.Log($"NostrSigner - Verifying signature for event ID: {eventIdHex}");
                 
                 // Convert signature hex to bytes
                 byte[] signatureBytes = HexToBytes(signatureHex);
@@ -168,7 +198,7 @@ namespace Nostr.Unity.Crypto
                     var verifier = new ECDsaSigner();
                     verifier.Init(false, keyParameters);
                     
-                    // Verify the signature
+                    // Verify the signature against the binary event ID
                     bool result = verifier.VerifySignature(eventId, r, s);
                     Debug.Log($"NostrSigner - Verification result: {result}");
                     
@@ -212,6 +242,30 @@ namespace Nostr.Unity.Crypto
                 Debug.LogError($"Error in NostrSigner.VerifySignature: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
+        }
+        
+        /// <summary>
+        /// Verifies a Nostr event signature (legacy method for backward compatibility)
+        /// </summary>
+        /// <param name="serializedEvent">The serialized event string</param>
+        /// <param name="signatureHex">The signature in hex format</param>
+        /// <param name="publicKeyHex">The public key in hex format</param>
+        /// <returns>True if the signature is valid, otherwise false</returns>
+        public static bool VerifySignature(string serializedEvent, string signatureHex, string publicKeyHex)
+        {
+            if (string.IsNullOrEmpty(serializedEvent))
+                throw new ArgumentException("Serialized event cannot be null or empty", nameof(serializedEvent));
+                
+            // Calculate the event ID (SHA-256 hash of the serialized event)
+            byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+            byte[] eventId;
+            using (var sha256 = SHA256.Create())
+            {
+                eventId = sha256.ComputeHash(eventBytes);
+            }
+            
+            // Call the main method with the computed hash
+            return VerifySignature(eventId, signatureHex, publicKeyHex);
         }
         
         /// <summary>

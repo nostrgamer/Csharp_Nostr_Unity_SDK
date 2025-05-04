@@ -131,17 +131,22 @@ namespace Nostr.Unity
             Debug.Log($"Signing serialized event: {serializedEvent}");
             
             // Compute the event ID as a hash of the serialized event
+            byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+            byte[] hashBytes;
             using (var sha256 = SHA256.Create())
             {
-                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-                byte[] hashBytes = sha256.ComputeHash(eventBytes);
-                
-                // Convert to hex lowercase - Nostr standard
-                Id = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                hashBytes = sha256.ComputeHash(eventBytes);
             }
             
-            // Use the NostrSigner to generate a signature
-            Signature = NostrSigner.SignEvent(serializedEvent, privateKey);
+            // Store the binary hash for signing
+            byte[] idBytes = hashBytes;
+            
+            // Convert the hash to hex string for the JSON id field
+            Id = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+            Debug.Log($"Computed event ID: {Id}");
+            
+            // IMPORTANT: Sign the actual 32-byte hash (idBytes), not the hex string
+            Signature = NostrSigner.SignEvent(idBytes, privateKey);
             
             // Log event details for debugging
             string completeEvent = SerializeComplete();
@@ -166,13 +171,15 @@ namespace Nostr.Unity
                 string serializedEvent = GetSerializedEvent();
                 Debug.Log($"Verifying serialized event: {serializedEvent}");
                 
-                // Validate the event ID
+                // Compute the SHA256 hash to get the binary event ID
+                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+                byte[] idBytes;
                 string computedId;
+                
                 using (var sha256 = SHA256.Create())
                 {
-                    byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-                    byte[] hashBytes = sha256.ComputeHash(eventBytes);
-                    computedId = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                    idBytes = sha256.ComputeHash(eventBytes);
+                    computedId = BitConverter.ToString(idBytes).Replace("-", "").ToLowerInvariant();
                 }
                 
                 // Verify the ID matches what we'd compute
@@ -197,8 +204,8 @@ namespace Nostr.Unity
                     Debug.Log($"Verifying with assumed compressed key: {keyForVerification}");
                 }
                 
-                // Use the NostrSigner to verify
-                return NostrSigner.VerifySignature(serializedEvent, Signature, keyForVerification);
+                // IMPORTANT: Verify using the binary hash (idBytes), not the hex string
+                return NostrSigner.VerifySignature(idBytes, Signature, keyForVerification);
             }
             catch (Exception ex)
             {
