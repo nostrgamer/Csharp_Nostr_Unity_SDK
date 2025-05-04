@@ -320,5 +320,53 @@ namespace Nostr.Unity.Crypto
                 
             return bytes;
         }
+        
+        /// <summary>
+        /// Verifies a serialized string event and its signature for debugging purposes
+        /// </summary>
+        /// <param name="serializedEvent">The serialized event string</param>
+        /// <param name="eventId">The event ID (hex)</param>
+        /// <param name="signatureHex">The signature (hex)</param>
+        /// <param name="publicKeyHex">The public key (hex)</param>
+        /// <returns>True if the signature is valid, otherwise false</returns>
+        public static bool DebugVerifySerializedEvent(string serializedEvent, string eventId, string signatureHex, string publicKeyHex)
+        {
+            try
+            {
+                Debug.Log($"DEBUG VERIFICATION - Serialized event: {serializedEvent}");
+                
+                // 1. Verify the id matches the SHA-256 of the serialized event
+                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+                string computedId;
+                byte[] idBytes;
+                
+                using (var sha256 = SHA256.Create())
+                {
+                    idBytes = sha256.ComputeHash(eventBytes);
+                    computedId = BytesToHex(idBytes);
+                }
+                
+                bool idMatches = string.Equals(computedId, eventId, StringComparison.OrdinalIgnoreCase);
+                Debug.Log($"DEBUG VERIFICATION - Event ID check: {idMatches}");
+                Debug.Log($"DEBUG VERIFICATION - Computed ID: {computedId}");
+                Debug.Log($"DEBUG VERIFICATION - Given ID: {eventId}");
+                
+                if (!idMatches)
+                {
+                    return false;
+                }
+                
+                // 2. Verify the signature for the hash
+                bool sigValid = VerifySignature(idBytes, signatureHex, publicKeyHex);
+                Debug.Log($"DEBUG VERIFICATION - Signature check: {sigValid}");
+                
+                return sigValid;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error in debug verification: {ex.Message}");
+                return false;
+            }
+        }
     }
 } 

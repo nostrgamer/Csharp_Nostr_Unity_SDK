@@ -154,6 +154,10 @@ namespace Nostr.Unity
             Debug.Log($"Event ID: {Id}");
             Debug.Log($"Public Key: {PublicKey}");
             Debug.Log($"Signature: {Signature}");
+            
+            // Verify signature immediately for debugging
+            bool verified = VerifySignature();
+            Debug.Log($"DEBUG - Local signature verification: {verified}");
         }
         
         /// <summary>
@@ -216,23 +220,39 @@ namespace Nostr.Unity
         
         /// <summary>
         /// Gets the serialized event data for signing, following the Nostr specification exactly.
-        /// Format: ["0", "pubkey", created_at, kind, tags, content]
+        /// Format: [0, pubkey, created_at, kind, tags, content]
         /// </summary>
         /// <returns>The serialized event data</returns>
         private string GetSerializedEvent()
         {
-            // The proper way to serialize for ID computation is to:
-            // 1. Create an array of [0, pubkey, created_at, kind, tags, content]
-            // 2. JSON encode the ENTIRE array with proper escaping
-
-            // Convert each field to its proper JSON representation
-            string serializedPubkey = JsonConvert.SerializeObject(PublicKey);
-            string serializedContent = JsonConvert.SerializeObject(Content);
-            string serializedTags = JsonConvert.SerializeObject(Tags);
+            // CRITICAL: For Nostr event serialization, we need to construct exactly:
+            // [0, <pubkey string>, <unix timestamp>, <kind number>, <tags array>, <content string>]
             
-            // Format the array manually to ensure proper structure
-            // This follows the exact NIP-01 serialization requirement
-            string serialized = $"[0,{serializedPubkey},{CreatedAt},{Kind},{serializedTags},{serializedContent}]";
+            // Use a proper fixed array to ensure consistent ordering
+            object[] eventArray = new object[]
+            {
+                0,              // Version marker, always 0
+                PublicKey,      // Hex public key without any prefix (32 bytes, 64 chars)
+                CreatedAt,      // Unix timestamp in seconds
+                Kind,           // Event kind as integer
+                Tags,           // Array of tag arrays
+                Content         // Content as string
+            };
+            
+            // Use the strict serialization settings required by Nostr relays
+            var settings = new JsonSerializerSettings
+            {
+                Formatting = Formatting.None,
+                NullValueHandling = NullValueHandling.Include,
+                // Ensure we don't add any extra whitespace that would affect the hash
+                StringEscapeHandling = StringEscapeHandling.Default
+            };
+            
+            // Serialize exactly as specified in NIP-01
+            string serialized = JsonConvert.SerializeObject(eventArray, settings);
+            
+            // Log for debugging
+            Debug.Log($"CRITICAL - Event serialized for ID computation: {serialized}");
             
             return serialized;
         }
@@ -263,6 +283,42 @@ namespace Nostr.Unity
             };
             
             return JsonConvert.SerializeObject(completeEvent, settings);
+        }
+        
+        /// <summary>
+        /// Deep debug method to verify the exact serialization and signature against a reference implementation
+        /// </summary>
+        /// <returns>True if verification passes all steps</returns>
+        public bool DeepDebugVerification()
+        {
+            try
+            {
+                // Get the serialized event string that should be used for ID computation
+                string serializedEvent = GetSerializedEvent();
+                
+                // Call the debug verification to check all steps
+                bool result = NostrSigner.DebugVerifySerializedEvent(
+                    serializedEvent,
+                    Id,
+                    Signature,
+                    CompressedPublicKey ?? ("02" + PublicKey) // Use compressed key or assume it
+                );
+                
+                // Log the complete process
+                Debug.Log($"DEEP DEBUG - Complete verification result: {result}");
+                Debug.Log($"DEEP DEBUG - Serialized: {serializedEvent}");
+                Debug.Log($"DEEP DEBUG - ID: {Id}");
+                Debug.Log($"DEEP DEBUG - PubKey: {PublicKey}");
+                Debug.Log($"DEEP DEBUG - CompressedPubKey: {CompressedPublicKey ?? ("02" + PublicKey)}");
+                Debug.Log($"DEEP DEBUG - Sig: {Signature}");
+                
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"DEEP DEBUG - Verification error: {ex.Message}");
+                return false;
+            }
         }
     }
 } 

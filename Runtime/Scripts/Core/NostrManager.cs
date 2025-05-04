@@ -430,16 +430,24 @@ namespace Nostr.Unity
             try
             {
                 string derivedPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
+                Debug.Log($"DEEP DEBUG - Derived public key from private key: {derivedPublicKey}");
+                Debug.Log($"DEEP DEBUG - Stored compressed public key: {CompressedPublicKey}");
+                
                 if (!string.IsNullOrEmpty(CompressedPublicKey) && 
                     !string.Equals(derivedPublicKey, CompressedPublicKey, StringComparison.OrdinalIgnoreCase))
                 {
-                    Debug.LogWarning($"Derived public key ({derivedPublicKey}) doesn't match stored compressed key ({CompressedPublicKey})");
+                    Debug.LogWarning($"CRITICAL KEY MISMATCH - Derived public key ({derivedPublicKey}) doesn't match stored compressed key ({CompressedPublicKey})");
+                    Debug.LogWarning("This will cause signature verification failures on relays!");
+                    
                     // Update our stored compressed key to the correct one
                     CompressedPublicKey = derivedPublicKey;
+                    
                     // Ensure we have the uncompressed version right too
                     if (derivedPublicKey.Length == 66 && (derivedPublicKey.StartsWith("02") || derivedPublicKey.StartsWith("03")))
                     {
-                        PublicKey = derivedPublicKey.Substring(2).ToLowerInvariant();
+                        string newUncompressed = derivedPublicKey.Substring(2).ToLowerInvariant();
+                        Debug.Log($"DEEP DEBUG - Updating uncompressed public key from {PublicKey} to {newUncompressed}");
+                        PublicKey = newUncompressed;
                     }
                 }
             }
@@ -466,6 +474,13 @@ namespace Nostr.Unity
             Debug.Log($"Signing event with private key starting with {PrivateKey.Substring(0, 4)}...");
             nostrEvent.Sign(PrivateKey);
             
+            // Verify locally again before sending
+            bool localVerification = nostrEvent.VerifySignature();
+            Debug.Log($"DEEP DEBUG - Final local verification before sending: {localVerification}");
+
+            // Perform an intensive debug verification with detailed logs
+            nostrEvent.DeepDebugVerification();
+
             StartCoroutine(PostTextNoteCoroutine(nostrEvent));
         }
         
