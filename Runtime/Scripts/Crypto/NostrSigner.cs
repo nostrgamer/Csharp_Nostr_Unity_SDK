@@ -495,15 +495,15 @@ namespace Nostr.Unity.Crypto
                     // Hex: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
                     byte[] curveOrderBytes = HexToBytes("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
                     
-                    // Create BigInteger representations - we need to be careful with byte order
-                    BigInteger curveOrder = new BigInteger(curveOrderBytes, true, true);
-                    BigInteger sValue = new BigInteger(s, true, true);
+                    // Create BigInteger representations with BouncyCastle format
+                    BigInteger curveOrder = new BigInteger(1, curveOrderBytes);
+                    BigInteger sValue = new BigInteger(1, s);
                     
-                    // Calculate n - s
-                    BigInteger lowS = curveOrder - sValue;
+                    // Calculate n - s using Subtract method
+                    BigInteger lowS = curveOrder.Subtract(sValue);
                     
                     // Convert back to byte array with proper padding
-                    byte[] lowSBytes = lowS.ToByteArray(true, true);
+                    byte[] lowSBytes = lowS.ToByteArrayUnsigned();
                     
                     // Ensure it's exactly 32 bytes
                     if (lowSBytes.Length < 32)
