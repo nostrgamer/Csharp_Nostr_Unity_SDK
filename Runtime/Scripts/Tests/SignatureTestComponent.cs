@@ -4,6 +4,7 @@ using System.Text;
 using UnityEngine;
 using Nostr.Unity;
 using Nostr.Unity.Crypto;
+using Nostr.Unity.Utils;
 
 /// <summary>
 /// Simplified test component for verifying Nostr signature functionality
@@ -186,15 +187,25 @@ public class SignatureTestComponent : MonoBehaviour
         NostrEvent nostrEvent = null;
         bool published = false;
         
+        // Prepare the event outside try-catch
+        string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        string content = $"Signature test message at {timestamp}";
+        
         try
         {
-            // Create a test event with timestamp
-            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-            string content = $"Signature test message at {timestamp}";
+            Log($"Creating test event with content: {content}");
+            Log($"Using public key: {publicKey}");
             
             // Create and sign the event
             nostrEvent = new NostrEvent(publicKey, 1, content);
+            
+            Log($"Created event, now signing with private key");
             nostrEvent.Sign(testPrivateKey);
+            
+            // Log detailed event information
+            Log($"Event ID: {nostrEvent.Id}");
+            Log($"Event public key: {nostrEvent.PublicKey}");
+            Log($"Event signature: {nostrEvent.Signature}");
             
             // Verify locally first
             bool verified = nostrEvent.VerifySignature();
@@ -203,22 +214,45 @@ public class SignatureTestComponent : MonoBehaviour
             if (!verified)
             {
                 Log("WARNING: Event failed local verification, relay will likely reject it");
+                Log("DETAILED DEBUG INFORMATION:");
+                Log($"  Public key used in event: {nostrEvent.PublicKey}");
+                Log($"  Compressed key available: {!string.IsNullOrEmpty(nostrEvent.CompressedPublicKey)}");
+                
+                // Try to get the public key again in different formats
+                string compressedKey = _keyManager.GetPublicKey(testPrivateKey, true);
+                string uncompressedKey = _keyManager.GetPublicKey(testPrivateKey, false);
+                
+                Log($"  Derived compressed key: {compressedKey}");
+                Log($"  Derived uncompressed key: {uncompressedKey}");
             }
             
             // Send to relay
             Log($"Sending event to relay: {relayUrl}");
+            
+            // Serialize the complete event for logging
+            string completeJson = nostrEvent.SerializeComplete();
+            Log($"Complete JSON being sent to relay: {completeJson}");
         }
         catch (Exception ex)
         {
             Log($"ERROR in relay test preparation: {ex.Message}");
+            Log($"Stack trace: {ex.StackTrace}");
             yield break;
         }
-            
+        
+        // Bail out if we failed to create the event
+        if (nostrEvent == null)
+        {
+            Log("ERROR: Failed to create event object");
+            yield break;
+        }
+        
         // Operations involving yield must be outside try-catch
+        Log("Calling PublishEvent on NostrClient...");
         yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
         Log($"Relay publish result: {published}");
         
-        yield return new WaitForSeconds(1);
+        yield return new WaitForSeconds(2); // Wait longer to ensure we get relay response
         
         try
         {
@@ -226,15 +260,50 @@ public class SignatureTestComponent : MonoBehaviour
             if (published)
             {
                 Log("Event was successfully published to relay!");
+                Log($"Verify your event on a web client using public key: {nostrEvent.PublicKey}");
+                string pubKey = nostrEvent.PublicKey;
+                
+                // Use Bech32Util instead of Bech32Encoder
+                try {
+                    // Use the Bech32Util and Hex utilities we just created
+                    string nPub = Nostr.Unity.Utils.Bech32Util.EncodeHex("npub", pubKey);
+                    Log($"Human-readable npub: {nPub}");
+                }
+                catch (Exception ex) {
+                    Log($"Error creating npub: {ex.Message}");
+                    Log($"You can still verify using the hex public key above");
+                }
+                
+                Log($"Event content: {nostrEvent.Content}");
             }
             else
             {
-                Log("Event may not have been published successfully");
+                Log("Event was REJECTED by the relay");
+                
+                // Check for specific errors
+                string error;
+                if (_nostrClient.HasEventErrors(nostrEvent.Id, out error))
+                {
+                    Log($"Error from relay: {error}");
+                    
+                    // Analyze common error types
+                    if (error.Contains("signature"))
+                    {
+                        Log("This appears to be a SIGNATURE ERROR");
+                        Log("This typically means the public key and signature don't match");
+                    }
+                    else if (error.Contains("duplicate"))
+                    {
+                        Log("This appears to be a DUPLICATE EVENT error");
+                        Log("The relay has already seen this event (not usually a problem)");
+                    }
+                }
             }
         }
         catch (Exception ex)
         {
             Log($"ERROR in relay response processing: {ex.Message}");
+            Log($"Stack trace: {ex.StackTrace}");
         }
         
         yield return null;

@@ -193,22 +193,34 @@ namespace Nostr.Unity
                 throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
                 
             // Double-check signature before sending
-            if (!nostrEvent.VerifySignature())
+            Debug.Log($"[DEBUG] Pre-publish verification check for event {nostrEvent.Id}");
+            bool verificationResult = nostrEvent.VerifySignature();
+            Debug.Log($"[DEBUG] Local signature verification result: {verificationResult}");
+            
+            if (!verificationResult)
             {
-                Debug.LogError("⚠️ Event signature verification failed - relays will reject this event!");
-                Debug.LogError("This usually means the private key doesn't match the public key used in the event.");
+                Debug.LogError("[DEBUG] ⚠️ Event signature verification failed - relays will reject this event!");
+                Debug.LogError("[DEBUG] This usually means the private key doesn't match the public key used in the event.");
+                Debug.LogError($"[DEBUG] Event ID: {nostrEvent.Id}");
+                Debug.LogError($"[DEBUG] Public Key: {nostrEvent.PublicKey}");
+                Debug.LogError($"[DEBUG] Signature: {nostrEvent.Signature}");
                 throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
             }
             
-            Debug.Log($"Publishing event with ID: {nostrEvent.Id}");
-            Debug.Log($"Event public key: {nostrEvent.PublicKey}");
+            Debug.Log($"[DEBUG] Publishing event with ID: {nostrEvent.Id}");
+            Debug.Log($"[DEBUG] Event public key: {nostrEvent.PublicKey}");
+            Debug.Log($"[DEBUG] Event signature: {nostrEvent.Signature}");
+            Debug.Log($"[DEBUG] Event kind: {nostrEvent.Kind}");
+            Debug.Log($"[DEBUG] Event timestamp: {nostrEvent.CreatedAt}");
             
             string jsonMessage = null;
+            string eventJson = null;
             
             try
             {
                 // Use the serialized complete event directly for proper JSON structure
-                string eventJson = nostrEvent.SerializeComplete();
+                eventJson = nostrEvent.SerializeComplete();
+                Debug.Log($"[DEBUG] Serialized event JSON: {eventJson}");
                 
                 // Create the proper Nostr message array: ["EVENT", {event}]
                 JArray message = new JArray();
@@ -216,62 +228,115 @@ namespace Nostr.Unity
                 message.Add(JObject.Parse(eventJson));
                 
                 jsonMessage = message.ToString(Formatting.None);
-                Debug.Log($"Publishing event message: {jsonMessage}");
+                Debug.Log($"[DEBUG] Publishing event message: {jsonMessage}");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error preparing event for publication: {ex.Message}");
-                Error?.Invoke(this, $"Failed to prepare event: {ex.Message}");
+                Debug.LogError($"[DEBUG] Error preparing event for publishing: {ex.Message}");
+                Debug.LogError($"[DEBUG] Stack trace: {ex.StackTrace}");
                 onComplete?.Invoke(false);
                 yield break;
             }
             
-            // Now send the message to all relays outside the try-catch
-            if (!string.IsNullOrEmpty(jsonMessage))
+            if (_webSockets.Count == 0)
             {
-                foreach (var webSocket in _webSockets)
+                Debug.LogWarning("[DEBUG] No connected relays to publish event to");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+            
+            Debug.Log($"[DEBUG] Attempting to publish to {_webSockets.Count} relays...");
+            
+            // Track responses from each relay
+            Dictionary<string, string> relayResponses = new Dictionary<string, string>();
+            int successCount = 0;
+            
+            // Send to each connected relay
+            for (int i = 0; i < _webSockets.Count; i++)
+            {
+                var webSocket = _webSockets[i];
+                string relayUrl = i < _relayUrls.Count ? _relayUrls[i] : "unknown";
+                
+                Task sendTask = null;
+                bool sendTaskStarted = false;
+                
+                try
                 {
                     if (webSocket.State == WebSocketState.Open)
                     {
-                        Task sendTask = null;
-                        try
-                        {
-                            Debug.Log($"Sending event to relay with WebSocket state: {webSocket.State}");
-                            sendTask = webSocket.SendAsync(
-                                new ArraySegment<byte>(Encoding.UTF8.GetBytes(jsonMessage)), 
-                                WebSocketMessageType.Text, 
-                                true, 
-                                _cancellationTokenSource.Token);
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.LogError($"Failed to start sending event to relay: {ex.Message}");
-                            Error?.Invoke(this, $"Failed to send event: {ex.Message}");
-                            continue;
-                        }
+                        Debug.Log($"[DEBUG] Sending to relay: {relayUrl}");
+                        byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
                         
-                        // Now the yield is outside of any try-catch
-                        if (sendTask != null)
-                        {
-                            yield return sendTask.AsCoroutine();
-                            Debug.Log($"Sent event to relay");
-                            success = true;
-                        }
+                        // Start the send task
+                        sendTask = webSocket.SendAsync(
+                            new ArraySegment<byte>(messageBytes),
+                            WebSocketMessageType.Text,
+                            true,
+                            _cancellationTokenSource.Token
+                        );
+                        sendTaskStarted = true;
                     }
                     else
                     {
-                        Debug.LogWarning($"Cannot send to relay - WebSocket state is {webSocket.State}");
+                        relayResponses[relayUrl] = $"WebSocket state was {webSocket.State}";
+                        Debug.LogWarning($"[DEBUG] Cannot send to relay {relayUrl} - WebSocket state is {webSocket.State}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    relayResponses[relayUrl] = $"Exception: {ex.Message}";
+                    Debug.LogError($"[DEBUG] Exception sending to relay {relayUrl}: {ex.Message}");
+                }
+                
+                // Yield outside the try-catch block
+                if (sendTaskStarted && sendTask != null)
+                {
+                    // Wait for task to complete
+                    while (!sendTask.IsCompleted)
+                    {
+                        yield return null;
+                    }
+                    
+                    try
+                    {
+                        // Check task result
+                        if (sendTask.IsCompletedSuccessfully)
+                        {
+                            success = true;
+                            successCount++;
+                            relayResponses[relayUrl] = "Message sent";
+                            Debug.Log($"[DEBUG] Successfully sent to relay: {relayUrl}");
+                        }
+                        else if (sendTask.IsFaulted)
+                        {
+                            relayResponses[relayUrl] = $"Send error: {sendTask.Exception?.Message}";
+                            Debug.LogError($"[DEBUG] Error sending to relay {relayUrl}: {sendTask.Exception?.Message}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        relayResponses[relayUrl] = $"Result checking error: {ex.Message}";
+                        Debug.LogError($"[DEBUG] Error checking task result for {relayUrl}: {ex.Message}");
                     }
                 }
             }
             
+            Debug.Log($"[DEBUG] Event {nostrEvent.Id} published to {successCount} out of {_webSockets.Count} relays");
+            
+            // Log detailed relay response summary
+            Debug.Log("[DEBUG] Relay response summary:");
+            foreach (var response in relayResponses)
+            {
+                Debug.Log($"[DEBUG]   - {response.Key}: {response.Value}");
+            }
+            
             if (success)
             {
-                Debug.Log($"Event {nostrEvent.Id} published to at least one relay");
+                Debug.Log($"[DEBUG] Event {nostrEvent.Id} published to at least one relay");
             }
             else
             {
-                Debug.LogError($"Failed to publish event {nostrEvent.Id} to any relay");
+                Debug.LogError($"[DEBUG] Failed to publish event {nostrEvent.Id} to any relay");
             }
             
             onComplete?.Invoke(success);
@@ -593,30 +658,63 @@ namespace Nostr.Unity
         /// </summary>
         private void HandleOkMessage(object[] okMessage, string relayUrl)
         {
-            if (okMessage.Length < 3)
+            try
             {
-                Debug.LogWarning($"Received invalid OK message format from {relayUrl}");
-                return;
-            }
-            
-            string eventId = okMessage[1]?.ToString();
-            bool success = okMessage[2]?.ToString() == "true";
-            string errorMessage = okMessage.Length > 3 ? okMessage[3]?.ToString() : null;
-            
-            if (success)
-            {
-                Debug.Log($"Event {eventId} successfully published to {relayUrl}");
-                // Remove any previous errors for this event
-                if (_eventErrors.ContainsKey(eventId))
+                if (okMessage.Length < 3)
                 {
-                    _eventErrors.Remove(eventId);
+                    Debug.LogWarning($"[DEBUG] Received invalid OK message format from {relayUrl}");
+                    return;
+                }
+                
+                string eventId = okMessage[1]?.ToString();
+                bool success = okMessage[2]?.ToString() == "true";
+                string errorMessage = okMessage.Length > 3 ? okMessage[3]?.ToString() : null;
+                
+                Debug.Log($"[DEBUG] Relay {relayUrl} responded to event {eventId} with status: {(success ? "ACCEPTED" : "REJECTED")}");
+                
+                if (success)
+                {
+                    Debug.Log($"[DEBUG] Event {eventId} successfully published to {relayUrl}");
+                    // Remove any previous errors for this event
+                    if (_eventErrors.ContainsKey(eventId))
+                    {
+                        _eventErrors.Remove(eventId);
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"[DEBUG] Event {eventId} was REJECTED by {relayUrl}");
+                    Debug.LogError($"[DEBUG] Rejection reason: {errorMessage ?? "No reason provided"}");
+                    
+                    // Categorize common rejection reasons for easier debugging
+                    if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        if (errorMessage.Contains("signature"))
+                        {
+                            Debug.LogError($"[DEBUG] ⚠️ SIGNATURE ERROR - Event rejected due to INVALID SIGNATURE");
+                            Debug.LogError($"[DEBUG] This typically means the signature verification failed on the relay");
+                        }
+                        else if (errorMessage.Contains("duplicate"))
+                        {
+                            Debug.Log($"[DEBUG] Duplicate event - already seen by relay (not an error)");
+                        }
+                        else if (errorMessage.Contains("pow") || errorMessage.Contains("proof of work"))
+                        {
+                            Debug.LogError($"[DEBUG] Proof of Work Error - Event needs more PoW to be accepted");
+                        }
+                        else if (errorMessage.Contains("rate"))
+                        {
+                            Debug.LogWarning($"[DEBUG] Rate Limit - Relay is throttling your submissions");
+                        }
+                    }
+                    
+                    // Store the error for this event
+                    _eventErrors[eventId] = $"Rejected by {relayUrl}: {errorMessage}";
                 }
             }
-            else
+            catch (Exception ex)
             {
-                Debug.Log($"Event {eventId} was rejected by {relayUrl}: {errorMessage}");
-                // Store the error for this event
-                _eventErrors[eventId] = $"Rejected by {relayUrl}: {errorMessage}";
+                Debug.LogError($"[DEBUG] Error handling OK message from {relayUrl}: {ex.Message}");
             }
         }
         
