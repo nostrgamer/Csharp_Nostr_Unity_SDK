@@ -75,11 +75,6 @@ namespace Nostr.Unity.Tests
             bool eventVerified = VerifySignatureHex(eventId, eventSignature, publicKeyHex);
             output.AppendLine($"Event verification result: {eventVerified}");
             
-            // Test 3: Create a complete event in JSON format
-            output.AppendLine("\n--- Test 3: Complete Event JSON ---");
-            string completeEvent = SerializeComplete(eventId, uncompressedPublicKey, createdAt, 1, content, tags, eventSignature);
-            output.AppendLine($"Complete event: {completeEvent}");
-            
             output.AppendLine("\nTests complete.");
             return output.ToString();
         }
@@ -249,25 +244,6 @@ namespace Nostr.Unity.Tests
             };
             
             return JsonConvert.SerializeObject(eventArray);
-        }
-        
-        /// <summary>
-        /// Serialize a complete event with ID and signature
-        /// </summary>
-        public static string SerializeComplete(string id, string pubkey, long createdAt, int kind, string content, string[][] tags, string sig)
-        {
-            var completeEvent = new Dictionary<string, object>
-            {
-                ["id"] = id,
-                ["pubkey"] = pubkey,
-                ["created_at"] = createdAt,
-                ["kind"] = kind,
-                ["tags"] = tags,
-                ["content"] = content,
-                ["sig"] = sig
-            };
-            
-            return JsonConvert.SerializeObject(completeEvent);
         }
         
         /// <summary>

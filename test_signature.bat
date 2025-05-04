@@ -1,5 +1,5 @@
 @echo off
-echo Creating signature test project...
+echo Creating signature test library...
 
 rem Clean up existing project if it exists
 if exist SignatureTestProject (
@@ -8,10 +8,10 @@ if exist SignatureTestProject (
 )
 
 rem Create a new class library project
-dotnet new classlib -o SignatureTestProject --force
+dotnet new classlib -o SignatureTestProject
 cd SignatureTestProject
 
-rem Create a simple project file targeting .NET Standard 2.0
+rem Create a simple project file
 echo ^<Project Sdk="Microsoft.NET.Sdk"^> > SignatureTestProject.csproj
 echo   ^<PropertyGroup^> >> SignatureTestProject.csproj
 echo     ^<TargetFramework^>netstandard2.0^</TargetFramework^> >> SignatureTestProject.csproj
@@ -26,8 +26,7 @@ echo ^</Project^> >> SignatureTestProject.csproj
 rem Copy the test file
 copy ..\SignatureTest.cs Program.cs /Y
 
-rem Build the project
-echo Building test library...
+rem Build the library
 dotnet build
 
 cd .. 

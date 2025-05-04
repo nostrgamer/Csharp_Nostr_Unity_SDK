@@ -195,20 +195,6 @@ For a quick UI-based test:
 
 You can then check your test message on a web-based Nostr client like [Coracle](https://coracle.social) or [Primal](https://primal.net) by searching for your public key.
 
-#### Method 3: Using the Unity Editor (Easiest)
-
-The SDK includes a custom editor extension for NostrManager that adds testing tools right in the Inspector:
-
-1. Select your NostrManager GameObject in the Hierarchy
-2. Enter Play mode
-3. Scroll down to the "Test Tools" section in the Inspector
-4. Type your test message (or use the default)
-5. Click the "Send Test Message" button
-
-The custom editor also shows you the current connection status and lists all connected relays.
-
-You can then check your test message on a web-based Nostr client like [Coracle](https://coracle.social) or [Primal](https://primal.net) by searching for your public key.
-
 ### Manual Key Management (If Needed)
 
 If you need direct access to the key management functionality, you can use:

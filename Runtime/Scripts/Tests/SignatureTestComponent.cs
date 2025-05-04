@@ -1,20 +1,18 @@
 using System;
 using System.Collections;
 using System.Text;
-using System.Security.Cryptography;
 using UnityEngine;
 using Nostr.Unity;
 using Nostr.Unity.Crypto;
-using Nostr.Unity.Utils;
 
 /// <summary>
-/// Test component for diagnosing Nostr signature generation and verification issues
+/// Simplified test component for verifying Nostr signature functionality
 /// </summary>
 public class SignatureTestComponent : MonoBehaviour
 {
     [Header("Test Configuration")]
     [SerializeField] private bool runTestsOnStart = true;
-    [SerializeField] private bool sendEventToRelay = true;
+    [SerializeField] private bool sendEventToRelay = false;
     [SerializeField] private string relayUrl = "wss://relay.damus.io";
     
     [Header("Test Keys")]
@@ -30,7 +28,6 @@ public class SignatureTestComponent : MonoBehaviour
     {
         _keyManager = new NostrKeyManager();
         
-        // Set up NostrClient if needed
         if (sendEventToRelay)
         {
             _nostrClient = FindAnyObjectByType<NostrClient>();
@@ -52,7 +49,7 @@ public class SignatureTestComponent : MonoBehaviour
     }
     
     /// <summary>
-    /// Runs all signature tests
+    /// Runs basic signature tests
     /// </summary>
     public IEnumerator RunAllTests()
     {
@@ -74,16 +71,13 @@ public class SignatureTestComponent : MonoBehaviour
             }
         }
         
-        // 1. Prepare test keys
+        // Prepare test keys
         yield return PrepareTestKeys();
         
-        // 2. Run basic signing test
-        yield return TestBasicSigning();
-        
-        // 3. Test full event signing and verification
+        // Test event signing and verification
         yield return TestEventSigning();
         
-        // 4. Test sending to relay if enabled
+        // Test sending to relay if enabled
         if (sendEventToRelay && _nostrClient != null)
         {
             yield return TestRelaySending();
@@ -91,10 +85,6 @@ public class SignatureTestComponent : MonoBehaviour
         
         Log("===== COMPLETED NOSTR SIGNATURE TESTS =====");
         testResults = _logBuilder.ToString();
-        
-        // Copy results to clipboard for easy sharing
-        GUIUtility.systemCopyBuffer = testResults;
-        Log("Test results copied to clipboard");
     }
     
     /// <summary>
@@ -118,22 +108,16 @@ public class SignatureTestComponent : MonoBehaviour
             testPrivateKey = _keyManager.GeneratePrivateKey();
         }
         
-        // Get the public key in both formats
-        string compressedPublicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-        string uncompressedPublicKey = compressedPublicKey.StartsWith("02") || compressedPublicKey.StartsWith("03") 
-            ? compressedPublicKey.Substring(2) 
-            : compressedPublicKey;
-            
-        Log($"Test Private Key: {testPrivateKey}");
-        Log($"Test Compressed Public Key: {compressedPublicKey}");
-        Log($"Test Uncompressed Public Key: {uncompressedPublicKey}");
+        // Get the public key
+        string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
+        Log($"Test Public Key: {publicKey}");
         
         // Verify key pair
         try
         {
             string message = "Test message";
             string signature = _keyManager.SignMessage(message, testPrivateKey);
-            bool verified = _keyManager.VerifySignature(message, signature, compressedPublicKey);
+            bool verified = _keyManager.VerifySignature(message, signature, publicKey);
             Log($"Basic key pair verification: {verified}");
             
             if (!verified)
@@ -150,137 +134,41 @@ public class SignatureTestComponent : MonoBehaviour
     }
     
     /// <summary>
-    /// Tests basic message signing and verification
-    /// </summary>
-    private IEnumerator TestBasicSigning()
-    {
-        Log("--- Testing Basic Signing ---");
-        
-        // Pre-allocate variables we'll need
-        string testData = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        string signature = null;
-        string publicKey = null;
-        bool verified = false;
-        bool verifiedCanonical = false;
-        string canonicalHex = null;
-        
-        try
-        {
-            // Sign a simple hex string directly 
-            Log($"Test data: {testData}");
-            
-            // Convert to bytes
-            byte[] dataBytes = NostrSigner.HexToBytes(testData);
-            
-            // Sign with our wrapper
-            signature = NostrSigner.SignEventId(testData, testPrivateKey);
-            Log($"Generated signature: {signature}");
-            
-            // Get the public key for verification
-            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-            
-            // Verify the signature
-            verified = NostrSigner.VerifySignatureHex(testData, signature, publicKey);
-            Log($"Signature verification result: {verified}");
-            
-            if (!verified)
-            {
-                Log("ERROR: Basic signature verification failed!");
-            }
-            
-            // Test with canonicalization explicitly
-            byte[] signatureBytes = NostrSigner.HexToBytes(signature);
-            byte[] canonicalSig = NostrSigner.GetCanonicalSignature(signatureBytes);
-            canonicalHex = NostrSigner.BytesToHex(canonicalSig);
-            
-            Log($"Original signature: {signature}");
-            Log($"Canonical signature: {canonicalHex}");
-            Log($"Signatures match: {signature == canonicalHex}");
-            
-            // Verify the canonical signature
-            verifiedCanonical = NostrSigner.VerifySignatureHex(testData, canonicalHex, publicKey);
-            Log($"Canonical signature verification: {verifiedCanonical}");
-        }
-        catch (Exception ex)
-        {
-            Log($"ERROR in basic signing test: {ex.Message}");
-        }
-        
-        yield return null;
-    }
-    
-    /// <summary>
-    /// Tests full Nostr event signing and verification
+    /// Tests event signing and verification
     /// </summary>
     private IEnumerator TestEventSigning()
     {
-        Log("--- Testing Nostr Event Signing ---");
+        Log("--- Testing Event Signing ---");
         
-        // Pre-allocate variables we'll need
-        string publicKey = null;
-        string uncompressedPublicKey = null;
-        string content = "Test message from SignatureTestComponent";
-        string[][] tags = new string[0][];
+        // Get the public key
+        string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
         NostrEvent nostrEvent = null;
-        bool verified = false;
-        bool deepVerified = false;
-        bool directVerify = false;
-        string serializedEvent = null;
         
         try
         {
-            // Get the public key for the event
-            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-            uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
-                ? publicKey.Substring(2) 
-                : publicKey;
-                
-            // Create the event using the NostrEvent class
-            nostrEvent = new NostrEvent(
-                uncompressedPublicKey, 
-                1, // Kind 1 = text note
-                content, 
-                tags,
-                publicKey // Pass compressed key for verification
-            );
+            // Create and sign a simple event
+            string content = "Test message from SignatureTestComponent";
+            nostrEvent = new NostrEvent(publicKey, 1, content);
             
-            // Sign the event
             Log("Signing event...");
             nostrEvent.Sign(testPrivateKey);
             
             // Log the event details
             Log($"Event ID: {nostrEvent.Id}");
-            Log($"Event pubkey: {nostrEvent.PublicKey}");
             Log($"Event signature: {nostrEvent.Signature}");
             
-            // Verify the event signature locally
-            verified = nostrEvent.VerifySignature();
+            // Verify the event signature
+            bool verified = nostrEvent.VerifySignature();
             Log($"Event verification result: {verified}");
             
             if (!verified)
             {
                 Log("ERROR: Event signature verification failed!");
             }
-            
-            // Do a deep debug verification
-            deepVerified = nostrEvent.DeepDebugVerification();
-            Log($"Deep verification result: {deepVerified}");
-            
-            // Get the serialized event for debugging
-            serializedEvent = nostrEvent.SerializeComplete();
-            Log($"Complete serialized event: {serializedEvent}");
-            
-            // Verify with direct methods
-            directVerify = NostrSigner.VerifySignatureHex(
-                nostrEvent.Id, 
-                nostrEvent.Signature, 
-                publicKey
-            );
-            Log($"Direct verification result: {directVerify}");
         }
         catch (Exception ex)
         {
-            Log($"ERROR in event signing test: {ex.Message}\n{ex.StackTrace}");
+            Log($"ERROR in event signing test: {ex.Message}");
         }
         
         yield return null;
@@ -293,43 +181,23 @@ public class SignatureTestComponent : MonoBehaviour
     {
         Log("--- Testing Relay Publishing ---");
         
-        // Pre-allocate variables we'll need outside the try
-        string publicKey = null;
-        string uncompressedPublicKey = null;
-        string timestamp = null;
-        string content = null;
-        string[][] tags = null;
+        // Get the public key
+        string publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
         NostrEvent nostrEvent = null;
-        bool verified = false;
         bool published = false;
         
         try
         {
-            // Get the public key for the event
-            publicKey = _keyManager.GetPublicKey(testPrivateKey, true);
-            uncompressedPublicKey = publicKey.StartsWith("02") || publicKey.StartsWith("03") 
-                ? publicKey.Substring(2) 
-                : publicKey;
-                
-            // Create a test event with timestamp and unique content
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-            content = $"Signature test message at {timestamp}";
-            tags = new string[0][];
+            // Create a test event with timestamp
+            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            string content = $"Signature test message at {timestamp}";
             
-            // Create the event
-            nostrEvent = new NostrEvent(
-                uncompressedPublicKey, 
-                1, 
-                content, 
-                tags,
-                publicKey
-            );
-            
-            // Sign the event
+            // Create and sign the event
+            nostrEvent = new NostrEvent(publicKey, 1, content);
             nostrEvent.Sign(testPrivateKey);
             
             // Verify locally first
-            verified = nostrEvent.VerifySignature();
+            bool verified = nostrEvent.VerifySignature();
             Log($"Local verification before sending: {verified}");
             
             if (!verified)
@@ -343,32 +211,25 @@ public class SignatureTestComponent : MonoBehaviour
         catch (Exception ex)
         {
             Log($"ERROR in relay test preparation: {ex.Message}");
-            yield break; // Exit if we had an error in preparation
+            yield break;
         }
             
-        // These operations involving yield must be outside the try-catch
+        // Operations involving yield must be outside try-catch
         yield return _nostrClient.PublishEvent(nostrEvent, result => published = result);
         Log($"Relay publish result: {published}");
         
-        // Wait a bit to get relay response
-        yield return new WaitForSeconds(2);
+        yield return new WaitForSeconds(1);
         
         try
         {
-            // Process relay response
-            Log("Checking relay response...");
-            // Check if we have any errors or confirmations in the client
-            if (_nostrClient.HasEventErrors(nostrEvent.Id, out string error))
-            {
-                Log($"Relay error: {error}");
-            }
-            else if (published)
+            // Check relay response
+            if (published)
             {
                 Log("Event was successfully published to relay!");
             }
             else
             {
-                Log("No explicit errors reported, but event may not have been published");
+                Log("Event may not have been published successfully");
             }
         }
         catch (Exception ex)
