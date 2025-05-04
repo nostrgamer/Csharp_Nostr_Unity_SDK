@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using UnityEngine;
 
 namespace Nostr.Unity.Utils
 {
@@ -134,6 +135,7 @@ namespace Nostr.Unity.Utils
                 if (prefix == "npub" && hexData.Length == 66 && (hexData.StartsWith("02") || hexData.StartsWith("03")))
                 {
                     // Remove the compression prefix for bech32 encoding
+                    Debug.Log($"[DEBUG] Removing compression prefix from npub key before Bech32 encoding");
                     hexData = hexData.Substring(2);
                 }
                 // For all other cases, enforce 64 character length

@@ -1,10 +1,14 @@
 using System;
-using System.Text;
+using System.Collections.Generic;
 using System.Security.Cryptography;
+using System.Text;
 using UnityEngine;
+using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
-using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Crypto.Digests;
 using Nostr.Unity.Utils;
 
 namespace Nostr.Unity.Crypto
@@ -187,76 +191,87 @@ namespace Nostr.Unity.Crypto
                     Debug.LogWarning("Signature uses high S value - this might be rejected by some relays");
                 }
                 
-                // Try verification with the provided key format
-                try
+                // Handle different public key formats
+                byte[] pubKeyBytes;
+                
+                if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
                 {
-                    byte[] pubKeyBytes;
-                    if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
-                    {
-                        pubKeyBytes = HexToBytes(publicKeyHex);
-                    }
-                    else if (publicKeyHex.Length == 64)
-                    {
-                        // This is a fallback that assumes 02 prefix - not cryptographically correct
-                        pubKeyBytes = HexToBytes("02" + publicKeyHex);
-                        Debug.LogWarning("Using assumed 02 prefix for public key");
-                    }
-                    else
-                    {
-                        Debug.LogError($"Invalid public key format: {publicKeyHex}");
-                        return false;
-                    }
-                    
-                    // Create the public key point
-                    var q = curve.Curve.DecodePoint(pubKeyBytes);
-                    var keyParameters = new ECPublicKeyParameters(q, domain);
-                    
-                    // Set up the verifier
-                    var verifier = new ECDsaSigner();
-                    verifier.Init(false, keyParameters);
-                    
-                    // Verify the signature against the binary event ID
-                    bool result = verifier.VerifySignature(eventId, r, s);
-                    Debug.Log($"NostrSigner - Verification result: {result}");
-                    
-                    return result;
+                    // This is a proper compressed public key (33 bytes with prefix)
+                    pubKeyBytes = HexToBytes(publicKeyHex);
+                    Debug.Log($"Using compressed public key with prefix: {publicKeyHex.Substring(0, 2)}");
                 }
-                catch (Exception ex)
+                else if (publicKeyHex.Length == 64)
                 {
-                    Debug.LogError($"Error in first verification attempt: {ex.Message}");
+                    // This is just the x-coordinate without the compression prefix
+                    // Try both 02 and 03 prefixes - only one will successfully reconstruct the valid point
+                    Debug.Log("Trying to verify with both 02 and 03 prefixes for uncompressed key");
                     
-                    // If the first attempt fails, try the alternative compression prefix
+                    bool result02 = false;
+                    bool result03 = false;
+                    
                     try
                     {
-                        string otherPrefix = publicKeyHex.StartsWith("02") ? "03" : "02";
-                        string alternateKey = publicKeyHex.Length == 66 ? 
-                            otherPrefix + publicKeyHex.Substring(2) : 
-                            otherPrefix + publicKeyHex;
-                            
-                        Debug.LogWarning($"Trying alternate key prefix: {alternateKey}");
-                        byte[] pubKeyBytes = HexToBytes(alternateKey);
-                            
-                        var q = curve.Curve.DecodePoint(pubKeyBytes);
-                        var keyParameters = new ECPublicKeyParameters(q, domain);
+                        // Try with 02 prefix
+                        byte[] pubKeyBytes02 = HexToBytes("02" + publicKeyHex);
+                        var q02 = curve.Curve.DecodePoint(pubKeyBytes02);
+                        var keyParameters02 = new ECPublicKeyParameters(q02, domain);
                         
-                        var verifier = new ECDsaSigner();
-                        verifier.Init(false, keyParameters);
-                        
-                        bool result = verifier.VerifySignature(eventId, r, s);
-                        Debug.Log($"NostrSigner - Verification with alternate key result: {result}");
-                        
-                        return result;
+                        var verifier02 = new ECDsaSigner();
+                        verifier02.Init(false, keyParameters02);
+                        result02 = verifier02.VerifySignature(eventId, r, s);
+                        Debug.Log($"Verification with 02 prefix: {result02}");
                     }
-                    catch (Exception ex2)
+                    catch (Exception ex)
                     {
-                        Debug.LogError($"Error in alternate verification: {ex2.Message}");
-                        return false;
+                        Debug.LogWarning($"Error verifying with 02 prefix: {ex.Message}");
                     }
+                    
+                    try
+                    {
+                        // Try with 03 prefix
+                        byte[] pubKeyBytes03 = HexToBytes("03" + publicKeyHex);
+                        var q03 = curve.Curve.DecodePoint(pubKeyBytes03);
+                        var keyParameters03 = new ECPublicKeyParameters(q03, domain);
+                        
+                        var verifier03 = new ECDsaSigner();
+                        verifier03.Init(false, keyParameters03);
+                        result03 = verifier03.VerifySignature(eventId, r, s);
+                        Debug.Log($"Verification with 03 prefix: {result03}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"Error verifying with 03 prefix: {ex.Message}");
+                    }
+                    
+                    // Return true if either prefix verification succeeded
+                    bool result = result02 || result03;
+                    Debug.Log($"Primary verification result: {result}");
+                    return result;
                 }
+                else
+                {
+                    Debug.LogError($"Invalid public key format: {publicKeyHex}");
+                    return false;
+                }
+                
+                // Create the public key point
+                var q = curve.Curve.DecodePoint(pubKeyBytes);
+                var keyParameters = new ECPublicKeyParameters(q, domain);
+                
+                // Set up the verifier
+                var verifier = new ECDsaSigner();
+                verifier.Init(false, keyParameters);
+                
+                // Verify the signature against the binary event ID
+                bool finalResult = verifier.VerifySignature(eventId, r, s);
+                Debug.Log($"VerifySignature - Primary verification result: {finalResult}");
+                
+                return finalResult;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error in NostrSigner.VerifySignature: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"[DEBUG] Error in VerifySignature: {ex.Message}");
+                Debug.LogError($"[DEBUG] Stack trace: {ex.StackTrace}");
                 return false;
             }
         }
@@ -816,6 +831,108 @@ namespace Nostr.Unity.Crypto
             }
             
             return result;
+        }
+
+        /// <summary>
+        /// Diagnostics tool to check if the public key is in the correct format for Nostr relays
+        /// </summary>
+        /// <param name="publicKeyHex">The public key to check</param>
+        /// <returns>A status report on key format</returns>
+        public static string DiagnosePublicKeyFormat(string publicKeyHex)
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"Diagnosing public key: {publicKeyHex}");
+                
+                // Check length
+                sb.AppendLine($"Key length: {publicKeyHex.Length} characters");
+                
+                if (publicKeyHex.Length == 66)
+                {
+                    if (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03"))
+                    {
+                        sb.AppendLine("✓ Key appears to be in compressed format with prefix");
+                        sb.AppendLine($"Compression prefix: {publicKeyHex.Substring(0, 2)}");
+                        
+                        // Check if it can be decoded as a valid point
+                        try
+                        {
+                            byte[] pubKeyBytes = HexToBytes(publicKeyHex);
+                            var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                            var q = curve.Curve.DecodePoint(pubKeyBytes);
+                            sb.AppendLine("✓ Key is valid on the secp256k1 curve");
+                            
+                            // Strip prefix for Nostr standard
+                            string nostrStandardKey = publicKeyHex.Substring(2);
+                            sb.AppendLine($"Recommended Nostr event pubkey value: {nostrStandardKey}");
+                        }
+                        catch (Exception ex)
+                        {
+                            sb.AppendLine($"✗ Key could not be decoded as a valid curve point: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("✗ Key is 66 characters but doesn't start with 02 or 03 compression prefix");
+                    }
+                }
+                else if (publicKeyHex.Length == 64)
+                {
+                    sb.AppendLine("✓ Key appears to be in standard Nostr format (uncompressed, 64 chars)");
+                    
+                    // Check if it can be used with 02 or 03 prefix
+                    bool valid02 = false;
+                    bool valid03 = false;
+                    
+                    try
+                    {
+                        byte[] pubKeyBytes02 = HexToBytes("02" + publicKeyHex);
+                        var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                        var q = curve.Curve.DecodePoint(pubKeyBytes02);
+                        valid02 = true;
+                    }
+                    catch { }
+                    
+                    try
+                    {
+                        byte[] pubKeyBytes03 = HexToBytes("03" + publicKeyHex);
+                        var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                        var q = curve.Curve.DecodePoint(pubKeyBytes03);
+                        valid03 = true;
+                    }
+                    catch { }
+                    
+                    if (valid02 && valid03)
+                    {
+                        sb.AppendLine("⚠ Key is ambiguous - both 02 and 03 prefixes are valid");
+                    }
+                    else if (valid02)
+                    {
+                        sb.AppendLine("✓ Key is valid with 02 prefix");
+                        sb.AppendLine($"Recommended verification key: 02{publicKeyHex}");
+                    }
+                    else if (valid03)
+                    {
+                        sb.AppendLine("✓ Key is valid with 03 prefix");
+                        sb.AppendLine($"Recommended verification key: 03{publicKeyHex}");
+                    }
+                    else
+                    {
+                        sb.AppendLine("✗ Key is not valid with either 02 or 03 prefix");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("✗ Key has invalid length. Should be 64 chars (Nostr standard) or 66 chars (with prefix)");
+                }
+                
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                return $"Error in key diagnosis: {ex.Message}";
+            }
         }
     }
 } 

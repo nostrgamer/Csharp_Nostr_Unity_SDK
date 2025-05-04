@@ -68,7 +68,7 @@ namespace Nostr.Unity
         /// <summary>
         /// Creates a new Nostr event
         /// </summary>
-        /// <param name="publicKey">The event creator's public key (uncompressed, 64 chars)</param>
+        /// <param name="publicKey">The event creator's public key (uncompressed, 64 chars or compressed, 66 chars)</param>
         /// <param name="kind">The event kind</param>
         /// <param name="content">The event content</param>
         /// <param name="tags">Optional event tags</param>
@@ -81,75 +81,53 @@ namespace Nostr.Unity
             if (string.IsNullOrEmpty(content))
                 throw new ArgumentException("Content cannot be null or empty", nameof(content));
             
-            // Important: Nostr expects exactly 64 characters (32 bytes) for public key
-            // If public key has a prefix, strip it for JSON serialization
+            // Important: Nostr protocol expects exactly 64 characters (32 bytes) for public key
+            // If public key has a compression prefix, strip it for JSON serialization
             if (publicKey.Length == 66 && (publicKey.StartsWith("02") || publicKey.StartsWith("03")))
             {
                 // Store the compressed key for verification
                 CompressedPublicKey = publicKey.ToLowerInvariant();
                 // Strip the prefix for the Nostr standard public key
                 PublicKey = publicKey.Substring(2).ToLowerInvariant();
+                Debug.Log($"[DEBUG] Converted compressed key (with prefix) to standard Nostr format");
             }
             else if (publicKey.Length == 64)
             {
-                // Standard format for Nostr JSON
+                // Standard key without prefix
                 PublicKey = publicKey.ToLowerInvariant();
                 
-                // For verification, use the compressed key if provided
-                if (!string.IsNullOrEmpty(compressedPublicKey) && 
-                    compressedPublicKey.Length == 66 && 
-                    (compressedPublicKey.StartsWith("02") || compressedPublicKey.StartsWith("03")))
+                // If we were provided with a compressed key, use that for verification
+                if (!string.IsNullOrEmpty(compressedPublicKey))
                 {
                     CompressedPublicKey = compressedPublicKey.ToLowerInvariant();
+                    Debug.Log($"[DEBUG] Using explicitly provided compressed key for verification");
+                }
+                else
+                {
+                    // We'll compute the compressed key as needed in verification
+                    Debug.Log($"[DEBUG] No compressed key provided, will derive during verification if needed");
                 }
             }
             else
             {
-                Debug.LogError($"Invalid public key format: {publicKey}");
-                throw new ArgumentException("Public key must be either 64 characters or 66 characters with 02/03 prefix", nameof(publicKey));
+                throw new ArgumentException($"Invalid public key format. Must be 64 chars (uncompressed) or 66 chars (compressed with 02/03 prefix). Got {publicKey.Length} chars.", nameof(publicKey));
             }
             
             Kind = kind;
             Content = content;
-            Tags = tags ?? Array.Empty<string[]>();
+            Tags = tags ?? new string[0][];
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             
-            // CRITICAL: Use the current time (UTC) for the timestamp
-            // Many relays reject events with future timestamps
-            long nowInSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            
-            // Do a sanity check on the timestamp - if it's in the future by more than a day,
-            // we have a system clock issue
-            if (nowInSeconds > 1700000000 && nowInSeconds < 1900000000) // Valid range ~2023-2030
-            {
-                // Timestamp is reasonable
-                CreatedAt = nowInSeconds;
-            }
-            else
-            {
-                // System clock is likely wrong - use a hardcoded recent timestamp
-                Debug.LogWarning($"System clock appears to be invalid: {DateTimeOffset.FromUnixTimeSeconds(nowInSeconds)}");
-                
-                // Use January 1, 2023 as a safe fallback that won't be rejected
-                CreatedAt = 1672531200; // January 1, 2023
-                Debug.LogWarning($"Using fallback timestamp: {DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd")}");
-            }
-            
-            Debug.Log($"TIMESTAMP DEBUG - Created event at unix timestamp: {CreatedAt} ({DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
+            // Generate the event ID
+            ComputeId();
         }
         
         /// <summary>
-        /// Signs the event with a private key
+        /// Computes the event ID based on the event data
         /// </summary>
-        /// <param name="privateKey">The private key to sign with</param>
-        public void Sign(string privateKey)
+        private void ComputeId()
         {
-            if (string.IsNullOrEmpty(privateKey))
-                throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
-            
-            // Ensure private key is lowercase
-            privateKey = privateKey.ToLowerInvariant();
-            
-            // Get the serialized event array for signing and creating ID
+            // Get the serialized event for signing
             string serializedEvent = GetSerializedEvent();
             Debug.Log($"[DEBUG] Signing serialized event (raw): {serializedEvent}");
             
@@ -176,8 +154,32 @@ namespace Nostr.Unity
             // Convert the hash to hex for the event ID
             Id = hashHex;
             
+            Debug.Log($"TIMESTAMP DEBUG - Created event at unix timestamp: {CreatedAt} ({DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
+        }
+        
+        /// <summary>
+        /// Signs the event with the given private key
+        /// </summary>
+        /// <param name="privateKey">The private key to sign with</param>
+        public void Sign(string privateKey)
+        {
             try
             {
+                if (string.IsNullOrEmpty(privateKey))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
+                
+                if (string.IsNullOrEmpty(Id))
+                    throw new InvalidOperationException("Event ID must be computed before signing");
+                
+                // Convert ID from hex to bytes for signing
+                byte[] hashBytes = Hex.HexToBytes(Id);
+                if (hashBytes.Length != 32)
+                {
+                    throw new InvalidOperationException($"Invalid event ID length: {hashBytes.Length} bytes. Expected 32 bytes.");
+                }
+                
+                Debug.Log($"[DEBUG] Signing event with ID: {Id}");
+                
                 // Get the NostrSigner to sign the event
                 var keyManager = new NostrKeyManager();
                 string publicKey = keyManager.GetPublicKey(privateKey, true);
@@ -220,33 +222,6 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Manually computes an ID using a reference implementation approach 
-        /// </summary>
-        private string ComputeManualId(string serializedEvent)
-        {
-            try
-            {
-                // Convert the serialized event to UTF-8 bytes
-                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
-                
-                // Compute the SHA-256 hash
-                byte[] hash;
-                using (var sha256 = SHA256.Create())
-                {
-                    hash = sha256.ComputeHash(eventBytes);
-                }
-                
-                // Convert to lowercase hex string
-                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error in manual ID computation: {ex.Message}");
-                return "ERROR";
-            }
-        }
-        
-        /// <summary>
         /// Verifies the event signature
         /// </summary>
         /// <returns>True if the signature is valid, otherwise false</returns>
@@ -278,48 +253,46 @@ namespace Nostr.Unity
                 Debug.Log($"[DEBUG] Using compressed public key: {CompressedPublicKey ?? "Not available"}");
                 Debug.Log($"[DEBUG] Signature to verify: {Signature}");
                 
-                string pubKeyToUse = !string.IsNullOrEmpty(CompressedPublicKey) 
-                    ? CompressedPublicKey 
-                    : PublicKey;
-                    
-                // If we have a 64-char public key, add compression prefix for verification
-                if (pubKeyToUse.Length == 64)
+                // Use compressed key if available, otherwise try standard key format for verification
+                if (!string.IsNullOrEmpty(CompressedPublicKey))
                 {
-                    // Try both compression prefixes to maximize compatibility
-                    string pubKey02 = "02" + pubKeyToUse;
-                    string pubKey03 = "03" + pubKeyToUse;
-                    
-                    Debug.Log($"[DEBUG] Public key has no prefix, trying with 02 and 03 prefixes");
-                    
-                    bool result02 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey02);
-                    bool result03 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey03);
-                    
-                    Debug.Log($"[DEBUG] Verification with 02 prefix: {result02}");
-                    Debug.Log($"[DEBUG] Verification with 03 prefix: {result03}");
-                    
-                    return result02 || result03;
+                    Debug.Log($"[DEBUG] Using pre-stored compressed public key for verification");
+                    bool result = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, CompressedPublicKey);
+                    Debug.Log($"[DEBUG] Standard signature verification result: {result}");
+                    return result;
                 }
                 
-                // Normal verification using the public key we have
-                bool result = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKeyToUse);
-                Debug.Log($"[DEBUG] Standard signature verification result: {result}");
+                // If we don't have a compressed key stored, try both standard compression prefixes
+                string pubKey02 = "02" + PublicKey;
+                string pubKey03 = "03" + PublicKey;
                 
-                if (!result)
+                Debug.Log($"[DEBUG] No compressed key available, trying with 02 prefix");
+                bool result02 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey02);
+                
+                if (result02)
                 {
-                    Debug.LogError("[DEBUG] Signature verification failed");
-                    Debug.LogError("[DEBUG] This will likely cause relays to reject this event");
-                    
-                    // Try alternative forms for debugging purposes
-                    if (pubKeyToUse.StartsWith("02") || pubKeyToUse.StartsWith("03"))
-                    {
-                        // Try without prefix
-                        string unprefixedKey = pubKeyToUse.Substring(2);
-                        bool altResult = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, unprefixedKey);
-                        Debug.LogError($"[DEBUG] Alternative verification without prefix: {altResult}");
-                    }
+                    // If verification passed with 02 prefix, store it for future use
+                    CompressedPublicKey = pubKey02;
+                    Debug.Log($"[DEBUG] Verification successful with 02 prefix, stored for future use");
+                    return true;
                 }
                 
-                return result;
+                Debug.Log($"[DEBUG] Trying with 03 prefix");
+                bool result03 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey03);
+                
+                if (result03)
+                {
+                    // If verification passed with 03 prefix, store it for future use
+                    CompressedPublicKey = pubKey03;
+                    Debug.Log($"[DEBUG] Verification successful with 03 prefix, stored for future use");
+                    return true;
+                }
+                
+                // Both prefixes failed
+                Debug.LogError("[DEBUG] Signature verification failed with both key prefixes");
+                Debug.LogError("[DEBUG] This will likely cause relays to reject this event");
+                
+                return false;
             }
             catch (Exception ex)
             {

@@ -140,7 +140,7 @@ namespace Nostr.Unity.Examples
                 }
                 
                 // Get the public key
-                _publicKey = _keyManager.GetPublicKey(_privateKey, useHex: true);
+                _publicKey = _keyManager.GetPublicKey(_privateKey, useCompressed: true);
                 
                 // Display the public key
                 if (publicKeyText != null)
