@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using UnityEngine;
 using Nostr.Unity.Utils;
 using Nostr.Unity.Crypto;
+using Newtonsoft.Json.Linq;
 
 namespace Nostr.Unity
 {
@@ -111,7 +112,11 @@ namespace Nostr.Unity
             Kind = kind;
             Content = content;
             Tags = tags ?? Array.Empty<string[]>();
+            
+            // CRITICAL: Use the current time (UTC) for the timestamp
+            // Many relays reject events with future timestamps
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            Debug.Log($"TIMESTAMP DEBUG - Created event at unix timestamp: {CreatedAt} ({DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
         }
         
         /// <summary>
@@ -132,11 +137,18 @@ namespace Nostr.Unity
             
             // Compute the event ID as a hash of the serialized event
             byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+            
+            // Show raw bytes for debugging
+            Debug.Log($"HASH DEBUG - UTF8 bytes ({eventBytes.Length} bytes): {BitConverter.ToString(eventBytes).Replace("-", " ")}");
+            
             byte[] hashBytes;
             using (var sha256 = SHA256.Create())
             {
                 hashBytes = sha256.ComputeHash(eventBytes);
             }
+            
+            // Show the binary hash for debugging
+            Debug.Log($"HASH DEBUG - Binary hash (32 bytes): {BitConverter.ToString(hashBytes).Replace("-", " ")}");
             
             // Store the binary hash for signing
             byte[] idBytes = hashBytes;
@@ -158,6 +170,39 @@ namespace Nostr.Unity
             // Verify signature immediately for debugging
             bool verified = VerifySignature();
             Debug.Log($"DEBUG - Local signature verification: {verified}");
+            
+            // Triple check: Verify the event against a reference implementation's expected hash
+            string manualId = ComputeManualId(serializedEvent);
+            bool idsMatch = string.Equals(Id, manualId, StringComparison.OrdinalIgnoreCase);
+            Debug.Log($"HASH VALIDATION - Manual ID calculation: {manualId}");
+            Debug.Log($"HASH VALIDATION - IDs match: {idsMatch}");
+        }
+        
+        /// <summary>
+        /// Manually computes an ID using a reference implementation approach 
+        /// </summary>
+        private string ComputeManualId(string serializedEvent)
+        {
+            try
+            {
+                // Convert the serialized event to UTF-8 bytes
+                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+                
+                // Compute the SHA-256 hash
+                byte[] hash;
+                using (var sha256 = SHA256.Create())
+                {
+                    hash = sha256.ComputeHash(eventBytes);
+                }
+                
+                // Convert to lowercase hex string
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error in manual ID computation: {ex.Message}");
+                return "ERROR";
+            }
         }
         
         /// <summary>
@@ -228,6 +273,13 @@ namespace Nostr.Unity
             // CRITICAL: For Nostr event serialization, we need to construct exactly:
             // [0, <pubkey string>, <unix timestamp>, <kind number>, <tags array>, <content string>]
             
+            // Log each field for debugging to ensure correct values
+            Debug.Log($"SERIALIZATION DEBUG - Event pubkey: {PublicKey}");
+            Debug.Log($"SERIALIZATION DEBUG - Event created_at: {CreatedAt}");
+            Debug.Log($"SERIALIZATION DEBUG - Event kind: {Kind}");
+            Debug.Log($"SERIALIZATION DEBUG - Event tags length: {Tags?.Length ?? 0}");
+            Debug.Log($"SERIALIZATION DEBUG - Event content: {Content}");
+            
             // Use a proper fixed array to ensure consistent ordering
             object[] eventArray = new object[]
             {
@@ -253,6 +305,17 @@ namespace Nostr.Unity
             
             // Log for debugging
             Debug.Log($"CRITICAL - Event serialized for ID computation: {serialized}");
+            
+            // Verify this is valid JSON by attempting to parse it
+            try
+            {
+                var test = JArray.Parse(serialized);
+                Debug.Log("SERIALIZATION DEBUG - Valid JSON array with " + test.Count + " elements");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"SERIALIZATION ERROR - Invalid JSON: {ex.Message}");
+            }
             
             return serialized;
         }

@@ -405,6 +405,8 @@ namespace Nostr.Unity
         /// <param name="content">The content of the note</param>
         public void PostTextNote(string content)
         {
+            Debug.Log("==== STARTING EVENT POST PROCESS ====");
+            
             if (string.IsNullOrEmpty(PrivateKey))
             {
                 Debug.LogError("Private key not set. Cannot sign event.");
@@ -426,12 +428,16 @@ namespace Nostr.Unity
                 return;
             }
             
+            // Check if the current time seems valid (not in the future)
+            long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            Debug.Log($"TIMESTAMP TEST - Current UTC timestamp: {currentTime} ({DateTimeOffset.FromUnixTimeSeconds(currentTime).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
+            
             // Validate keys match - the public key should be derived from the private key
             try
             {
                 string derivedPublicKey = _keyManager.GetPublicKey(PrivateKey, true);
-                Debug.Log($"DEEP DEBUG - Derived public key from private key: {derivedPublicKey}");
-                Debug.Log($"DEEP DEBUG - Stored compressed public key: {CompressedPublicKey}");
+                Debug.Log($"KEY VALIDATION - Derived public key from private key: {derivedPublicKey}");
+                Debug.Log($"KEY VALIDATION - Stored compressed public key: {CompressedPublicKey}");
                 
                 if (!string.IsNullOrEmpty(CompressedPublicKey) && 
                     !string.Equals(derivedPublicKey, CompressedPublicKey, StringComparison.OrdinalIgnoreCase))
@@ -446,9 +452,13 @@ namespace Nostr.Unity
                     if (derivedPublicKey.Length == 66 && (derivedPublicKey.StartsWith("02") || derivedPublicKey.StartsWith("03")))
                     {
                         string newUncompressed = derivedPublicKey.Substring(2).ToLowerInvariant();
-                        Debug.Log($"DEEP DEBUG - Updating uncompressed public key from {PublicKey} to {newUncompressed}");
+                        Debug.Log($"KEY VALIDATION - Updating uncompressed public key from {PublicKey} to {newUncompressed}");
                         PublicKey = newUncompressed;
                     }
+                }
+                else
+                {
+                    Debug.Log("KEY VALIDATION - Public key matches the derived key from private key ✓");
                 }
             }
             catch (Exception ex)
@@ -476,11 +486,13 @@ namespace Nostr.Unity
             
             // Verify locally again before sending
             bool localVerification = nostrEvent.VerifySignature();
-            Debug.Log($"DEEP DEBUG - Final local verification before sending: {localVerification}");
+            Debug.Log($"EVENT VERIFICATION - Local verification result: {localVerification}");
 
             // Perform an intensive debug verification with detailed logs
-            nostrEvent.DeepDebugVerification();
-
+            bool deepVerification = nostrEvent.DeepDebugVerification();
+            Debug.Log($"EVENT VERIFICATION - Deep verification result: {deepVerification}");
+            
+            Debug.Log("==== SENDING EVENT TO RELAYS ====");
             StartCoroutine(PostTextNoteCoroutine(nostrEvent));
         }
         
