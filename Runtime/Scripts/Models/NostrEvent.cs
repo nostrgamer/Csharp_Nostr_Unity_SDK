@@ -303,73 +303,44 @@ namespace Nostr.Unity
         }
         
         /// <summary>
-        /// Gets the serialized event for signing
+        /// Gets the serialized event data for signing/ID computation
         /// </summary>
-        /// <returns>JSON string of the event for signing</returns>
+        /// <returns>The serialized event as JSON</returns>
         public string GetSerializedEvent()
         {
-            // CRITICAL: For Nostr event serialization, we need to construct exactly:
-            // [0, <pubkey string>, <unix timestamp>, <kind number>, <tags array>, <content string>]
-            
-            // Log each field for debugging to ensure correct values
-            Debug.Log($"[DEBUG] SERIALIZATION - Event pubkey: {PublicKey}");
-            Debug.Log($"[DEBUG] SERIALIZATION - Event created_at: {CreatedAt}");
-            Debug.Log($"[DEBUG] SERIALIZATION - Event kind: {Kind}");
-            Debug.Log($"[DEBUG] SERIALIZATION - Event tags length: {Tags?.Length ?? 0}");
-            Debug.Log($"[DEBUG] SERIALIZATION - Event content: {Content}");
-            
-            // Use a proper fixed array to ensure consistent ordering
-            object[] eventArray = new object[]
+            // Create a new anonymous object with only the required fields in the specific order
+            // This is critical for signatures as serialization order matters
+            var serializableEvent = new
             {
-                0,              // Version marker, always 0
-                PublicKey,      // Hex public key without any prefix (32 bytes, 64 chars)
-                CreatedAt,      // Unix timestamp in seconds
-                Kind,           // Event kind as integer
-                Tags,           // Array of tag arrays
-                Content         // Content as string
+                // The pubkey needs to be standard 64-char format for Nostr relays
+                pubkey = PublicKey.ToLowerInvariant(), // Ensure lowercase
+                created_at = CreatedAt,
+                kind = Kind,
+                tags = Tags ?? new string[0][],
+                content = Content
             };
             
-            // Use the strict serialization settings required by Nostr relays
-            var settings = new JsonSerializerSettings
-            {
-                Formatting = Formatting.None,
-                NullValueHandling = NullValueHandling.Include,
-                // Ensure we don't add any extra whitespace that would affect the hash
-                StringEscapeHandling = StringEscapeHandling.Default
-            };
+            // Serialize the event with Newtonsoft.Json
+            string serialized = JsonConvert.SerializeObject(serializableEvent);
             
-            // Serialize exactly as specified in NIP-01
-            string serialized = JsonConvert.SerializeObject(eventArray, settings);
+            // Ensure consistent formatting by creating an array with fixed order
+            // [0, pubkey, created_at, kind, tags, content]
+            var jsonParse = JObject.Parse(serialized);
+            var arr = new JArray();
             
-            // Log for debugging
-            Debug.Log($"[DEBUG] Full serialized event for ID computation: {serialized}");
+            arr.Add(0);
+            arr.Add(jsonParse["pubkey"]);
+            arr.Add(jsonParse["created_at"]);
+            arr.Add(jsonParse["kind"]);
+            arr.Add(jsonParse["tags"]);
+            arr.Add(jsonParse["content"]);
             
-            // Verify this is valid JSON by attempting to parse it
-            try
-            {
-                var test = JArray.Parse(serialized);
-                Debug.Log($"[DEBUG] Valid JSON array with {test.Count} elements");
-                
-                // Log individual elements for detailed inspection
-                for (int i = 0; i < test.Count; i++)
-                {
-                    var element = test[i];
-                    string elementType = element.Type.ToString();
-                    string elementValue = element.ToString(Formatting.None);
-                    
-                    // Truncate very long values
-                    if (elementValue.Length > 100)
-                        elementValue = elementValue.Substring(0, 97) + "...";
-                        
-                    Debug.Log($"[DEBUG] Element {i}: Type={elementType}, Value={elementValue}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[DEBUG] SERIALIZATION ERROR - Invalid JSON: {ex.Message}");
-            }
+            // Convert to JSON string
+            string json = arr.ToString(Formatting.None);
             
-            return serialized;
+            Debug.Log($"[DEBUG] Serialized event (raw): {json}");
+            
+            return json;
         }
         
         /// <summary>

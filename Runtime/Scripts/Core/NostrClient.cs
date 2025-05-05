@@ -249,94 +249,90 @@ namespace Nostr.Unity
             
             // Track responses from each relay
             Dictionary<string, string> relayResponses = new Dictionary<string, string>();
-            int successCount = 0;
+            List<Task> sendTasks = new List<Task>();
             
-            // Send to each connected relay
+            // Clear any previous errors for this event
+            _eventErrors.Remove(nostrEvent.Id);
+            
+            // Initiate sending to all connected relays
             for (int i = 0; i < _webSockets.Count; i++)
             {
                 var webSocket = _webSockets[i];
                 string relayUrl = i < _relayUrls.Count ? _relayUrls[i] : "unknown";
                 
-                Task sendTask = null;
-                bool sendTaskStarted = false;
+                if (webSocket.State != WebSocketState.Open)
+                {
+                    Debug.LogWarning($"[DEBUG] Skipping {relayUrl} - WebSocket state is {webSocket.State}");
+                    relayResponses[relayUrl] = $"WebSocket not open (state: {webSocket.State})";
+                    continue;
+                }
                 
                 try
                 {
-                    if (webSocket.State == WebSocketState.Open)
-                    {
-                        Debug.Log($"[DEBUG] Sending to relay: {relayUrl}");
-                        byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
-                        
-                        // Start the send task
-                        sendTask = webSocket.SendAsync(
-                            new ArraySegment<byte>(messageBytes),
-                            WebSocketMessageType.Text,
-                            true,
-                            _cancellationTokenSource.Token
-                        );
-                        sendTaskStarted = true;
-                    }
-                    else
-                    {
-                        relayResponses[relayUrl] = $"WebSocket state was {webSocket.State}";
-                        Debug.LogWarning($"[DEBUG] Cannot send to relay {relayUrl} - WebSocket state is {webSocket.State}");
-                    }
+                    Debug.Log($"[DEBUG] Sending to relay: {relayUrl}");
+                    byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
+                    
+                    // Create a new task for this send operation
+                    var sendTask = webSocket.SendAsync(
+                        new ArraySegment<byte>(messageBytes),
+                        WebSocketMessageType.Text,
+                        true,
+                        _cancellationTokenSource.Token
+                    );
+                    
+                    sendTasks.Add(sendTask);
+                    
+                    // Track which task belongs to which relay
+                    int relayIndex = i;
+                    sendTask.ContinueWith(t => {
+                        if (t.IsFaulted)
+                        {
+                            string errorMsg = t.Exception?.InnerException?.Message ?? "Unknown error";
+                            relayResponses[relayUrl] = $"Send failed: {errorMsg}";
+                            Debug.LogError($"[DEBUG] Failed to send to {relayUrl}: {errorMsg}");
+                        }
+                        else if (t.IsCompleted)
+                        {
+                            relayResponses[relayUrl] = "Message sent";
+                            Debug.Log($"[DEBUG] Successfully sent to {relayUrl}");
+                            success = true;
+                        }
+                    }, TaskContinuationOptions.ExecuteSynchronously);
                 }
                 catch (Exception ex)
                 {
                     relayResponses[relayUrl] = $"Exception: {ex.Message}";
                     Debug.LogError($"[DEBUG] Exception sending to relay {relayUrl}: {ex.Message}");
                 }
+            }
+            
+            // Wait for all send tasks to complete
+            while (sendTasks.Count > 0)
+            {
+                // Remove completed tasks
+                sendTasks.RemoveAll(t => t.IsCompleted || t.IsFaulted || t.IsCanceled);
                 
-                // Yield outside the try-catch block
-                if (sendTaskStarted && sendTask != null)
-                {
-                    // Wait for task to complete
-                    while (!sendTask.IsCompleted)
-                    {
-                        yield return null;
-                    }
-                    
-                    try
-                    {
-                        // Check task result
-                        if (sendTask.IsCompletedSuccessfully)
-                        {
-                            success = true;
-                            successCount++;
-                            relayResponses[relayUrl] = "Message sent";
-                            Debug.Log($"[DEBUG] Successfully sent to relay: {relayUrl}");
-                        }
-                        else if (sendTask.IsFaulted)
-                        {
-                            relayResponses[relayUrl] = $"Send error: {sendTask.Exception?.Message}";
-                            Debug.LogError($"[DEBUG] Error sending to relay {relayUrl}: {sendTask.Exception?.Message}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        relayResponses[relayUrl] = $"Result checking error: {ex.Message}";
-                        Debug.LogError($"[DEBUG] Error checking task result for {relayUrl}: {ex.Message}");
-                    }
-                }
+                if (sendTasks.Count > 0)
+                    yield return null;
             }
             
-            Debug.Log($"[DEBUG] Event {nostrEvent.Id} published to {successCount} out of {_webSockets.Count} relays");
-            
-            // Log detailed relay response summary
-            Debug.Log("[DEBUG] Relay response summary:");
-            foreach (var response in relayResponses)
+            // Check responses and determine if we had any successes
+            Debug.Log($"[DEBUG] Publication status for event {nostrEvent.Id}:");
+            foreach (var relayResponse in relayResponses)
             {
-                Debug.Log($"[DEBUG]   - {response.Key}: {response.Value}");
+                Debug.Log($"[DEBUG] - {relayResponse.Key}: {relayResponse.Value}");
             }
             
-            if (success)
+            // Store any errors for the event
+            if (!success)
             {
-                Debug.Log($"[DEBUG] Event {nostrEvent.Id} published to at least one relay");
+                string combinedErrors = string.Join("; ", relayResponses.Values);
+                _eventErrors[nostrEvent.Id] = combinedErrors;
+                Debug.LogError($"[DEBUG] Event {nostrEvent.Id} failed to publish to any relays: {combinedErrors}");
             }
             else
             {
-                Debug.LogError($"[DEBUG] Failed to publish event {nostrEvent.Id} to any relay");
+                Debug.Log($"[DEBUG] Event {nostrEvent.Id} published successfully to at least one relay");
             }
             
             onComplete?.Invoke(success);

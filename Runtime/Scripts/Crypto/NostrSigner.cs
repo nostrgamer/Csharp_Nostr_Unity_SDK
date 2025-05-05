@@ -22,92 +22,67 @@ namespace Nostr.Unity.Crypto
         private static readonly Nostr.Unity.BouncyCryptography _cryptography = new Nostr.Unity.BouncyCryptography();
         
         /// <summary>
-        /// Signs an event hash with a private key
+        /// Signs a Nostr event using the provided private key
         /// </summary>
-        /// <param name="eventId">The binary 32-byte event ID (SHA-256 hash of the serialized event)</param>
+        /// <param name="eventId">The event ID (32-byte SHA-256 hash)</param>
         /// <param name="privateKeyHex">The private key in hex format</param>
-        /// <returns>The signature as a hex string</returns>
+        /// <returns>The signature in hex format</returns>
         public static string SignEvent(byte[] eventId, string privateKeyHex)
         {
             try
             {
                 if (eventId == null || eventId.Length != 32)
+                    throw new ArgumentException("Event ID must be 32 bytes", nameof(eventId));
+                
+                if (string.IsNullOrEmpty(privateKeyHex))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKeyHex));
+                
+                // Normalize to lowercase and strip any "nsec" prefix
+                privateKeyHex = privateKeyHex.ToLowerInvariant();
+                if (privateKeyHex.StartsWith("nsec"))
                 {
-                    throw new ArgumentException("Event ID must be exactly 32 bytes", nameof(eventId));
+                    // Try to decode from bech32
+                    try
+                    {
+                        string decodedKey = Bech32Util.DecodeKey(privateKeyHex);
+                        if (!string.IsNullOrEmpty(decodedKey))
+                        {
+                            privateKeyHex = decodedKey;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error decoding nsec: {ex.Message}");
+                    }
                 }
                 
-                Debug.Log($"[DEBUG] NostrSigner - Signing event ID (binary, 32 bytes)");
+                // Ensure key is exactly 64 characters (32 bytes) hex
+                if (privateKeyHex.Length != 64 || !System.Text.RegularExpressions.Regex.IsMatch(privateKeyHex, "^[0-9a-f]{64}$"))
+                {
+                    throw new ArgumentException("Private key must be 64 hex characters", nameof(privateKeyHex));
+                }
                 
-                // Convert event ID bytes to hex for debugging
-                string eventIdHex = BytesToHex(eventId);
-                Debug.Log($"[DEBUG] NostrSigner - Event ID (hex): {eventIdHex}");
-                
-                // Convert private key from hex to bytes - must be exactly 32 bytes
+                // Convert the private key from hex to bytes
                 byte[] privateKeyBytes = HexToBytes(privateKeyHex);
-                if (privateKeyBytes.Length != 32)
-                {
-                    Debug.LogError($"[DEBUG] Private key length error: {privateKeyBytes.Length} bytes, expected 32 bytes");
-                    throw new ArgumentException("Private key must be exactly 32 bytes (64 hex characters)");
-                }
                 
-                // Set up the signer with deterministic k generation (RFC 6979) - CRITICAL for Nostr
-                // This ensures same message + key always produces same signature
-                var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
-                var domain = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
-                var signer = new ECDsaSigner(new HMacDsaKCalculator(new Org.BouncyCastle.Crypto.Digests.Sha256Digest()));
+                // Sign the message hash with the private key
+                byte[] signatureBytes = SignMessage(eventId, privateKeyBytes);
                 
-                Debug.Log($"[DEBUG] NostrSigner - Using secp256k1 curve with deterministic k generation (RFC 6979)");
+                // Debug logging
+                Debug.Log($"SignEvent - Event ID length: {eventId.Length} bytes");
+                Debug.Log($"SignEvent - Private key length: {privateKeyBytes.Length} bytes");
+                Debug.Log($"SignEvent - Signature length: {signatureBytes.Length} bytes");
                 
-                // Create the private key parameter
-                var keyParameters = new ECPrivateKeyParameters(new BigInteger(1, privateKeyBytes), domain);
+                // Convert the signature to a hex string
+                string signature = BytesToHex(signatureBytes).ToLowerInvariant();
                 
-                // Initialize the signer
-                signer.Init(true, keyParameters);
-                Debug.Log($"[DEBUG] NostrSigner - Signer initialized");
-                
-                // Sign the event ID directly
-                BigInteger[] signature = signer.GenerateSignature(eventId);
-                Debug.Log($"[DEBUG] NostrSigner - Raw signature generated: r={signature[0].ToString(16)}, s={signature[1].ToString(16)}");
-                
-                // Extract r and s values for normalization
-                BigInteger r = signature[0];
-                BigInteger s = signature[1];
-                
-                // Apply BIP-0062 low S value normalization
-                BigInteger n = domain.N; // Curve order
-                BigInteger half = n.Divide(new BigInteger("2"));
-                
-                if (s.CompareTo(half) > 0) // s > n/2
-                {
-                    Debug.Log($"[DEBUG] NostrSigner - Normalizing S value to low-S form (BIP-0062)");
-                    s = n.Subtract(s); // s = n - s
-                }
-                
-                // Convert r and s to fixed-length byte arrays (32 bytes each)
-                byte[] rBytes = PadIfNeeded(r.ToByteArrayUnsigned(), 32);
-                byte[] sBytes = PadIfNeeded(s.ToByteArrayUnsigned(), 32);
-                
-                // Concatenate r and s to form the 64-byte signature
-                byte[] concatenated = new byte[64];
-                Array.Copy(rBytes, 0, concatenated, 0, 32);
-                Array.Copy(sBytes, 0, concatenated, 32, 32);
-                
-                // Convert to hex string
-                string result = BytesToHex(concatenated);
-                Debug.Log($"[DEBUG] NostrSigner - Final signature (hex): {result}");
-                
-                // Final check for signature length
-                if (result.Length != 128) {
-                    Debug.LogError($"[DEBUG] NostrSigner - WARNING: Final signature has incorrect length: {result.Length}, expected 128");
-                }
-                
-                return result;
+                return signature;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[DEBUG] NostrSigner - Error during signing: {ex.Message}");
-                Debug.LogError($"[DEBUG] NostrSigner - Stack trace: {ex.StackTrace}");
-                throw;
+                Debug.LogError($"Error signing event: {ex.Message}");
+                Debug.LogError($"Stack trace: {ex.StackTrace}");
+                throw; // Re-throw to let the caller handle it
             }
         }
         
@@ -157,102 +132,72 @@ namespace Nostr.Unity.Crypto
                     throw new ArgumentException("Event ID must be exactly 32 bytes", nameof(eventId));
                 }
                 
-                // Convert event ID bytes to hex for debugging
-                string eventIdHex = BytesToHex(eventId);
-                Debug.Log($"NostrSigner - Verifying signature for event ID: {eventIdHex}");
-                
-                // Convert signature hex to bytes
-                byte[] signatureBytes = HexToBytes(signatureHex);
-                if (signatureBytes.Length != 64)
+                // Validate input formats
+                if (string.IsNullOrEmpty(signatureHex))
                 {
-                    Debug.LogError("Signature must be exactly 64 bytes");
+                    Debug.LogError("[DEBUG] Signature is null or empty");
                     return false;
                 }
                 
-                // Extract r and s components
-                byte[] rBytes = new byte[32];
-                byte[] sBytes = new byte[32];
-                Array.Copy(signatureBytes, 0, rBytes, 0, 32);
-                Array.Copy(signatureBytes, 32, sBytes, 0, 32);
-                
-                // Convert to BigIntegers
-                BigInteger r = new BigInteger(1, rBytes);
-                BigInteger s = new BigInteger(1, sBytes);
-                
-                // Get the secp256k1 curve
-                var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
-                var domain = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
-                
-                // Ensure our signature follows low-S value canonical form
-                BigInteger n = curve.N;
-                BigInteger halfN = n.ShiftRight(1);
-                if (s.CompareTo(halfN) > 0)
+                if (string.IsNullOrEmpty(publicKeyHex))
                 {
-                    Debug.LogWarning("Signature uses high S value - this might be rejected by some relays");
+                    Debug.LogError("[DEBUG] Public key is null or empty");
+                    return false;
                 }
+                
+                // Normalize inputs to lowercase
+                signatureHex = signatureHex.ToLowerInvariant();
+                publicKeyHex = publicKeyHex.ToLowerInvariant();
                 
                 // Handle different public key formats
                 byte[] pubKeyBytes;
-                
-                if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
+                if (publicKeyHex.Length == 64) // Raw 32-byte key without prefix
                 {
-                    // This is a proper compressed public key (33 bytes with prefix)
-                    pubKeyBytes = HexToBytes(publicKeyHex);
-                    Debug.Log($"Using compressed public key with prefix: {publicKeyHex.Substring(0, 2)}");
+                    // Compressed format is actually required for verification
+                    // We'll try both possible prefixes (02 and 03)
+                    Debug.Log("[DEBUG] Uncompressed public key detected, will try both compression prefixes");
+                    pubKeyBytes = new byte[33];
+                    pubKeyBytes[0] = 0x02; // First try with 02 prefix
+                    Array.Copy(HexToBytes(publicKeyHex), 0, pubKeyBytes, 1, 32);
                 }
-                else if (publicKeyHex.Length == 64)
+                else if (publicKeyHex.Length == 66 && (publicKeyHex.StartsWith("02") || publicKeyHex.StartsWith("03")))
                 {
-                    // This is just the x-coordinate without the compression prefix
-                    // Try both 02 and 03 prefixes - only one will successfully reconstruct the valid point
-                    Debug.Log("Trying to verify with both 02 and 03 prefixes for uncompressed key");
-                    
-                    bool result02 = false;
-                    bool result03 = false;
-                    
-                    try
-                    {
-                        // Try with 02 prefix
-                        byte[] pubKeyBytes02 = HexToBytes("02" + publicKeyHex);
-                        var q02 = curve.Curve.DecodePoint(pubKeyBytes02);
-                        var keyParameters02 = new ECPublicKeyParameters(q02, domain);
-                        
-                        var verifier02 = new ECDsaSigner();
-                        verifier02.Init(false, keyParameters02);
-                        result02 = verifier02.VerifySignature(eventId, r, s);
-                        Debug.Log($"Verification with 02 prefix: {result02}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning($"Error verifying with 02 prefix: {ex.Message}");
-                    }
-                    
-                    try
-                    {
-                        // Try with 03 prefix
-                        byte[] pubKeyBytes03 = HexToBytes("03" + publicKeyHex);
-                        var q03 = curve.Curve.DecodePoint(pubKeyBytes03);
-                        var keyParameters03 = new ECPublicKeyParameters(q03, domain);
-                        
-                        var verifier03 = new ECDsaSigner();
-                        verifier03.Init(false, keyParameters03);
-                        result03 = verifier03.VerifySignature(eventId, r, s);
-                        Debug.Log($"Verification with 03 prefix: {result03}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning($"Error verifying with 03 prefix: {ex.Message}");
-                    }
-                    
-                    // Return true if either prefix verification succeeded
-                    bool result = result02 || result03;
-                    Debug.Log($"Primary verification result: {result}");
-                    return result;
+                    // Already compressed format
+                    Debug.Log($"[DEBUG] Using compressed public key with prefix: {publicKeyHex.Substring(0, 2)}");
+                    pubKeyBytes = HexToBytes(publicKeyHex);
                 }
                 else
                 {
                     Debug.LogError($"Invalid public key format: {publicKeyHex}");
                     return false;
                 }
+                
+                // Convert signature to bytes
+                if (signatureHex.Length != 128)
+                {
+                    Debug.LogError($"[DEBUG] Invalid signature length: {signatureHex.Length} chars, expected 128");
+                    return false;
+                }
+                
+                byte[] signatureBytes = HexToBytes(signatureHex);
+                if (signatureBytes.Length != 64)
+                {
+                    Debug.LogError($"[DEBUG] Invalid signature byte length: {signatureBytes.Length}, expected 64");
+                    return false;
+                }
+                
+                // Split signature into r and s components
+                byte[] rBytes = new byte[32];
+                byte[] sBytes = new byte[32];
+                Array.Copy(signatureBytes, 0, rBytes, 0, 32);
+                Array.Copy(signatureBytes, 32, sBytes, 0, 32);
+                
+                var r = new BigInteger(1, rBytes);
+                var s = new BigInteger(1, sBytes);
+                
+                // Get the secp256k1 curve
+                var curve = Org.BouncyCastle.Asn1.Sec.SecNamedCurves.GetByName("secp256k1");
+                var domain = new ECDomainParameters(curve.Curve, curve.G, curve.N, curve.H);
                 
                 // Create the public key point
                 var q = curve.Curve.DecodePoint(pubKeyBytes);
@@ -263,10 +208,21 @@ namespace Nostr.Unity.Crypto
                 verifier.Init(false, keyParameters);
                 
                 // Verify the signature against the binary event ID
-                bool finalResult = verifier.VerifySignature(eventId, r, s);
-                Debug.Log($"VerifySignature - Primary verification result: {finalResult}");
+                bool result = verifier.VerifySignature(eventId, r, s);
                 
-                return finalResult;
+                // If verification fails with 02 prefix, try with 03 prefix
+                if (!result && publicKeyHex.Length == 64)
+                {
+                    Debug.Log("[DEBUG] First verification attempt failed, trying with 03 prefix");
+                    pubKeyBytes[0] = 0x03;
+                    q = curve.Curve.DecodePoint(pubKeyBytes);
+                    keyParameters = new ECPublicKeyParameters(q, domain);
+                    verifier.Init(false, keyParameters);
+                    result = verifier.VerifySignature(eventId, r, s);
+                }
+                
+                Debug.Log($"[DEBUG] Signature verification result: {result}");
+                return result;
             }
             catch (Exception ex)
             {
