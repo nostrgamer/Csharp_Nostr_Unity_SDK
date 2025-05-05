@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json;
 
 namespace Nostr.Unity
 {
@@ -63,33 +64,7 @@ namespace Nostr.Unity
         /// <returns>A JSON representation of the filter</returns>
         public string ToJson()
         {
-            // Simple JSON serialization without dependencies
-            var parts = new List<string>();
-            
-            if (Ids != null && Ids.Length > 0)
-                parts.Add($"\"ids\":[{string.Join(",", Ids.Select(id => $"\"{id}\""))}]");
-                
-            if (Authors != null && Authors.Length > 0)
-                parts.Add($"\"authors\":[{string.Join(",", Authors.Select(author => $"\"{author}\""))}]");
-                
-            if (Kinds != null && Kinds.Length > 0)
-                parts.Add($"\"kinds\":[{string.Join(",", Kinds)}]");
-                
-            if (EventRefs != null && EventRefs.Length > 0)
-                parts.Add($"\"#e\":[{string.Join(",", EventRefs.Select(e => $"\"{e}\""))}]");
-                
-            if (PubkeyRefs != null && PubkeyRefs.Length > 0)
-                parts.Add($"\"#p\":[{string.Join(",", PubkeyRefs.Select(p => $"\"{p}\""))}]");
-                
-            if (Since.HasValue)
-                parts.Add($"\"since\":{Since.Value}");
-                
-            if (Until.HasValue)
-                parts.Add($"\"until\":{Until.Value}");
-                
-            parts.Add($"\"limit\":{Limit}");
-            
-            return "{" + string.Join(",", parts) + "}";
+            return JsonConvert.SerializeObject(this);
         }
     }
 } 

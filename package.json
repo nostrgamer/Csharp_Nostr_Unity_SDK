@@ -19,7 +19,8 @@
     "url": "https://github.com/nostrgamer"
   },
   "dependencies": {
-    "com.unity.nuget.newtonsoft-json": "3.0.2"
+    "com.unity.nuget.newtonsoft-json": "3.0.2",
+    "com.unity.nuget.mono-cecil": "1.10.1"
   },
   "samples": [
     {

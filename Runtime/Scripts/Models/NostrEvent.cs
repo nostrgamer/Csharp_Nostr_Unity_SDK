@@ -2,172 +2,423 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json;
 using UnityEngine;
+using Nostr.Unity.Utils;
+using Nostr.Unity.Crypto;
+using Newtonsoft.Json.Linq;
 
 namespace Nostr.Unity
 {
     /// <summary>
-    /// Represents a Nostr event according to NIP-01
+    /// Represents a Nostr event with proper validation and serialization
     /// </summary>
-    [Serializable]
+    [JsonObject(MemberSerialization.OptIn)]
     public class NostrEvent
     {
         /// <summary>
-        /// The event ID (32-bytes lowercase hex-encoded sha256 of the serialized event data)
+        /// The event ID (32-byte hex-encoded string)
         /// </summary>
-        public string Id;
+        [JsonProperty("id")]
+        public string Id { get; private set; }
         
         /// <summary>
-        /// The public key of the event creator (32-bytes lowercase hex-encoded public key)
+        /// The event creator's public key (32-byte hex-encoded string)
         /// </summary>
-        public string PubKey;
+        [JsonProperty("pubkey")]
+        public string PublicKey { get; private set; }
         
         /// <summary>
-        /// When the event was created (Unix timestamp in seconds)
+        /// The public key in compressed format for internal verification
+        /// Not serialized to JSON - used only for signature verification
         /// </summary>
-        public long CreatedAt;
+        [JsonIgnore]
+        internal string CompressedPublicKey { get; private set; }
         
         /// <summary>
-        /// The event kind (integer indicating the type of event)
+        /// The Unix timestamp when the event was created
         /// </summary>
-        public int Kind;
+        [JsonProperty("created_at")]
+        public long CreatedAt { get; private set; }
         
         /// <summary>
-        /// Tags for the event (each tag is an array of strings)
+        /// The event kind/type
         /// </summary>
-        public List<List<string>> Tags = new List<List<string>>();
+        [JsonProperty("kind")]
+        public int Kind { get; private set; }
         
         /// <summary>
-        /// The content of the event
+        /// The event tags (array of arrays)
         /// </summary>
-        public string Content;
+        [JsonProperty("tags")]
+        public string[][] Tags { get; private set; }
         
         /// <summary>
-        /// The signature of the event
+        /// The event content
         /// </summary>
-        public string Sig;
-        
-        // Static instance of the NostrKeyManager for signing and verification
-        private static NostrKeyManager _keyManager = new NostrKeyManager();
+        [JsonProperty("content")]
+        public string Content { get; private set; }
         
         /// <summary>
-        /// Creates a new Nostr event with the current timestamp
+        /// The event signature (64-byte hex-encoded string)
         /// </summary>
-        public NostrEvent()
+        [JsonProperty("sig")]
+        public string Signature { get; private set; }
+        
+        /// <summary>
+        /// Creates a new Nostr event
+        /// </summary>
+        /// <param name="publicKey">The event creator's public key (uncompressed, 64 chars or compressed, 66 chars)</param>
+        /// <param name="kind">The event kind</param>
+        /// <param name="content">The event content</param>
+        /// <param name="tags">Optional event tags</param>
+        /// <param name="compressedPublicKey">Optional compressed public key for verification. If not provided, will attempt to derive it.</param>
+        public NostrEvent(string publicKey, int kind, string content, string[][] tags = null, string compressedPublicKey = null)
         {
+            if (string.IsNullOrEmpty(publicKey))
+                throw new ArgumentException("Public key cannot be null or empty", nameof(publicKey));
+            
+            if (string.IsNullOrEmpty(content))
+                throw new ArgumentException("Content cannot be null or empty", nameof(content));
+            
+            // Important: Nostr protocol expects exactly 64 characters (32 bytes) for public key
+            // If public key has a compression prefix, strip it for JSON serialization
+            if (publicKey.Length == 66 && (publicKey.StartsWith("02") || publicKey.StartsWith("03")))
+            {
+                // Store the compressed key for verification
+                CompressedPublicKey = publicKey.ToLowerInvariant();
+                // Strip the prefix for the Nostr standard public key
+                PublicKey = publicKey.Substring(2).ToLowerInvariant();
+                Debug.Log($"[DEBUG] Converted compressed key (with prefix) to standard Nostr format");
+            }
+            else if (publicKey.Length == 64)
+            {
+                // Standard key without prefix
+                PublicKey = publicKey.ToLowerInvariant();
+                
+                // If we were provided with a compressed key, use that for verification
+                if (!string.IsNullOrEmpty(compressedPublicKey))
+                {
+                    CompressedPublicKey = compressedPublicKey.ToLowerInvariant();
+                    Debug.Log($"[DEBUG] Using explicitly provided compressed key for verification");
+                }
+                else
+                {
+                    // We'll compute the compressed key as needed in verification
+                    Debug.Log($"[DEBUG] No compressed key provided, will derive during verification if needed");
+                }
+            }
+            else
+            {
+                throw new ArgumentException($"Invalid public key format. Must be 64 chars (uncompressed) or 66 chars (compressed with 02/03 prefix). Got {publicKey.Length} chars.", nameof(publicKey));
+            }
+            
+            Kind = kind;
+            Content = content;
+            Tags = tags ?? new string[0][];
             CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Tags = new List<List<string>>();
+            
+            // Generate the event ID
+            ComputeId();
         }
         
         /// <summary>
-        /// Signs the event with a private key
+        /// Computes the event ID based on the event data
+        /// </summary>
+        private void ComputeId()
+        {
+            // Get the serialized event for signing
+            string serializedEvent = GetSerializedEvent();
+            Debug.Log($"[DEBUG] Signing serialized event (raw): {serializedEvent}");
+            
+            // Compute the event ID as a hash of the serialized event
+            byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+            Debug.Log($"[DEBUG] Serialized event bytes length: {eventBytes.Length}");
+            
+            // Log the first 50 bytes for debugging (if too long)
+            if (eventBytes.Length > 50) {
+                string bytesPreview = BitConverter.ToString(eventBytes, 0, 50).Replace("-", "");
+                Debug.Log($"[DEBUG] First 50 bytes of serialized event: {bytesPreview}...");
+            }
+            
+            byte[] hashBytes;
+            using (var sha256 = SHA256.Create())
+            {
+                hashBytes = sha256.ComputeHash(eventBytes);
+            }
+            
+            // Log the raw hash bytes
+            string hashHex = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+            Debug.Log($"[DEBUG] Event ID hash (hex): {hashHex}");
+            
+            // Convert the hash to hex for the event ID
+            Id = hashHex;
+            
+            Debug.Log($"TIMESTAMP DEBUG - Created event at unix timestamp: {CreatedAt} ({DateTimeOffset.FromUnixTimeSeconds(CreatedAt).ToString("yyyy-MM-dd HH:mm:ss")} UTC)");
+        }
+        
+        /// <summary>
+        /// Signs the event with the given private key
         /// </summary>
         /// <param name="privateKey">The private key to sign with</param>
         public void Sign(string privateKey)
         {
-            // Calculate the event ID if not already set
-            if (string.IsNullOrEmpty(Id))
+            try
             {
-                Id = CalculateId();
+                if (string.IsNullOrEmpty(privateKey))
+                    throw new ArgumentException("Private key cannot be null or empty", nameof(privateKey));
+                
+                if (string.IsNullOrEmpty(Id))
+                    throw new InvalidOperationException("Event ID must be computed before signing");
+                
+                // Convert ID from hex to bytes for signing
+                byte[] hashBytes = Hex.HexToBytes(Id);
+                if (hashBytes.Length != 32)
+                {
+                    throw new InvalidOperationException($"Invalid event ID length: {hashBytes.Length} bytes. Expected 32 bytes.");
+                }
+                
+                Debug.Log($"[DEBUG] Signing event with ID: {Id}");
+                
+                // Get the NostrSigner to sign the event
+                var keyManager = new NostrKeyManager();
+                string publicKey = keyManager.GetPublicKey(privateKey, true);
+                Debug.Log($"[DEBUG] Public key used for signing (hex): {publicKey}");
+                
+                // Log whether we have a compressed public key
+                Debug.Log($"[DEBUG] CompressedPublicKey available: {!string.IsNullOrEmpty(CompressedPublicKey)}");
+                Debug.Log($"[DEBUG] PublicKey value: {PublicKey}");
+                
+                // Sign the event ID with the private key
+                Signature = Crypto.NostrSigner.SignEvent(hashBytes, privateKey);
+                Debug.Log($"[DEBUG] Generated signature (hex): {Signature}");
+                
+                // Verify signature immediately after signing
+                bool verificationResult = VerifySignature();
+                Debug.Log($"[DEBUG] Local signature verification result: {verificationResult}");
+                
+                if (!verificationResult)
+                {
+                    // Detailed signature verification failure diagnostics
+                    Debug.LogError("[DEBUG] ⚠️ LOCAL SIGNATURE VERIFICATION FAILED - WHY?");
+                    Debug.LogError($"[DEBUG] Event ID: {Id}");
+                    Debug.LogError($"[DEBUG] Public Key: {PublicKey}");
+                    Debug.LogError($"[DEBUG] Compressed Public Key: {CompressedPublicKey}");
+                    Debug.LogError($"[DEBUG] Signature: {Signature}");
+                    // Try to verify with alternate key formats
+                    string derivedPublicKey = keyManager.GetPublicKey(privateKey, false);
+                    string derivedCompressedKey = keyManager.GetPublicKey(privateKey, true);
+                    Debug.LogError($"[DEBUG] Derived Public Key: {derivedPublicKey}");
+                    Debug.LogError($"[DEBUG] Derived Compressed Key: {derivedCompressedKey}");
+                }
             }
-            
-            // Sign the event ID with the private key
-            Sig = _keyManager.SignMessage(Id, privateKey);
-            
-            Debug.Log($"Signed event with ID: {Id}");
+            catch (Exception ex)
+            {
+                // If something goes wrong with the signing, log it in detail
+                Debug.LogError($"[DEBUG] Error during signing: {ex.Message}");
+                Debug.LogError($"[DEBUG] Stack trace: {ex.StackTrace}");
+                throw;
+            }
         }
         
         /// <summary>
         /// Verifies the event signature
         /// </summary>
         /// <returns>True if the signature is valid, otherwise false</returns>
-        public bool Verify()
+        public bool VerifySignature()
         {
-            if (string.IsNullOrEmpty(Id) || string.IsNullOrEmpty(PubKey) || string.IsNullOrEmpty(Sig))
+            try
             {
-                Debug.LogError("Cannot verify event: missing ID, PubKey, or Sig");
+                // Check if we have the necessary values
+                if (string.IsNullOrEmpty(Id))
+                {
+                    Debug.LogError("[DEBUG] Cannot verify signature: Event ID is missing");
+                    return false;
+                }
+                
+                if (string.IsNullOrEmpty(PublicKey))
+                {
+                    Debug.LogError("[DEBUG] Cannot verify signature: Public key is missing");
+                    return false;
+                }
+                
+                if (string.IsNullOrEmpty(Signature))
+                {
+                    Debug.LogError("[DEBUG] Cannot verify signature: Signature is missing");
+                    return false;
+                }
+                
+                Debug.Log($"[DEBUG] Verifying signature for event: {Id}");
+                Debug.Log($"[DEBUG] Using public key: {PublicKey}");
+                Debug.Log($"[DEBUG] Using compressed public key: {CompressedPublicKey ?? "Not available"}");
+                Debug.Log($"[DEBUG] Signature to verify: {Signature}");
+                
+                // Use compressed key if available, otherwise try standard key format for verification
+                if (!string.IsNullOrEmpty(CompressedPublicKey))
+                {
+                    Debug.Log($"[DEBUG] Using pre-stored compressed public key for verification");
+                    bool result = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, CompressedPublicKey);
+                    Debug.Log($"[DEBUG] Standard signature verification result: {result}");
+                    return result;
+                }
+                
+                // If we don't have a compressed key stored, try both standard compression prefixes
+                string pubKey02 = "02" + PublicKey;
+                string pubKey03 = "03" + PublicKey;
+                
+                Debug.Log($"[DEBUG] No compressed key available, trying with 02 prefix");
+                bool result02 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey02);
+                
+                if (result02)
+                {
+                    // If verification passed with 02 prefix, store it for future use
+                    CompressedPublicKey = pubKey02;
+                    Debug.Log($"[DEBUG] Verification successful with 02 prefix, stored for future use");
+                    return true;
+                }
+                
+                Debug.Log($"[DEBUG] Trying with 03 prefix");
+                bool result03 = Crypto.NostrSigner.VerifySignatureHex(Id, Signature, pubKey03);
+                
+                if (result03)
+                {
+                    // If verification passed with 03 prefix, store it for future use
+                    CompressedPublicKey = pubKey03;
+                    Debug.Log($"[DEBUG] Verification successful with 03 prefix, stored for future use");
+                    return true;
+                }
+                
+                // Both prefixes failed
+                Debug.LogError("[DEBUG] Signature verification failed with both key prefixes");
+                Debug.LogError("[DEBUG] This will likely cause relays to reject this event");
+                
                 return false;
             }
-            
-            // Recalculate the ID to ensure it matches
-            string calculatedId = CalculateId();
-            if (calculatedId != Id)
+            catch (Exception ex)
             {
-                Debug.LogError($"Event ID mismatch: {calculatedId} != {Id}");
+                Debug.LogError($"[DEBUG] Error during signature verification: {ex.Message}");
+                Debug.LogError($"[DEBUG] Stack trace: {ex.StackTrace}");
                 return false;
             }
-            
-            // Verify the signature against the ID and public key
-            return _keyManager.VerifySignature(Id, Sig, PubKey);
         }
         
         /// <summary>
-        /// Calculates the event ID according to NIP-01
+        /// Gets the serialized event data for signing/ID computation
         /// </summary>
-        /// <returns>The event ID as a lowercase hex string</returns>
-        private string CalculateId()
+        /// <returns>The serialized event as JSON</returns>
+        public string GetSerializedEvent()
         {
-            // Serialize the event data for ID calculation according to NIP-01
-            string serialized = $"[0,\"{PubKey}\",{CreatedAt},{Kind},{SerializeTags()},\"{Content}\"]";
-            
-            // Calculate SHA256 hash
-            using (SHA256 sha256 = SHA256.Create())
+            // Create a new anonymous object with only the required fields in the specific order
+            // This is critical for signatures as serialization order matters
+            var serializableEvent = new
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(serialized);
-                byte[] hash = sha256.ComputeHash(bytes);
-                
-                // Convert to lowercase hex string
-                StringBuilder sb = new StringBuilder();
-                foreach (byte b in hash)
-                {
-                    sb.Append(b.ToString("x2"));
-                }
-                
-                return sb.ToString();
-            }
+                // The pubkey needs to be standard 64-char format for Nostr relays
+                pubkey = PublicKey.ToLowerInvariant(), // Ensure lowercase
+                created_at = CreatedAt,
+                kind = Kind,
+                tags = Tags ?? new string[0][],
+                content = Content
+            };
+            
+            // Serialize the event with Newtonsoft.Json
+            string serialized = JsonConvert.SerializeObject(serializableEvent);
+            
+            // Ensure consistent formatting by creating an array with fixed order
+            // [0, pubkey, created_at, kind, tags, content]
+            var jsonParse = JObject.Parse(serialized);
+            var arr = new JArray();
+            
+            arr.Add(0);
+            arr.Add(jsonParse["pubkey"]);
+            arr.Add(jsonParse["created_at"]);
+            arr.Add(jsonParse["kind"]);
+            arr.Add(jsonParse["tags"]);
+            arr.Add(jsonParse["content"]);
+            
+            // Convert to JSON string
+            string json = arr.ToString(Formatting.None);
+            
+            Debug.Log($"[DEBUG] Serialized event (raw): {json}");
+            
+            return json;
         }
         
         /// <summary>
-        /// Serializes the tags for ID calculation
+        /// Serializes the complete event including ID and signature
         /// </summary>
-        /// <returns>The serialized tags as a JSON array</returns>
-        private string SerializeTags()
+        /// <returns>JSON string of the complete event</returns>
+        public string SerializeComplete()
         {
-            if (Tags == null || Tags.Count == 0)
+            // Create a new anonymous object to ensure proper order
+            var completeEvent = new
             {
-                return "[]";
-            }
+                id = Id?.ToLowerInvariant(),
+                pubkey = PublicKey?.ToLowerInvariant(),
+                created_at = CreatedAt,
+                kind = Kind,
+                tags = Tags,
+                content = Content,
+                sig = Signature?.ToLowerInvariant()
+            };
             
-            StringBuilder sb = new StringBuilder();
-            sb.Append('[');
-            
-            for (int i = 0; i < Tags.Count; i++)
+            // Use settings matching Nostr relay expectations
+            var settings = new JsonSerializerSettings
             {
-                List<string> tag = Tags[i];
-                sb.Append('[');
+                Formatting = Formatting.None,
+                NullValueHandling = NullValueHandling.Include
+            };
+            
+            return JsonConvert.SerializeObject(completeEvent, settings);
+        }
+        
+        /// <summary>
+        /// Deep debug method to verify the exact serialization and signature against a reference implementation
+        /// </summary>
+        /// <returns>True if verification passes all steps</returns>
+        public bool DeepDebugVerification()
+        {
+            try
+            {
+                // Get the serialized event string that should be used for ID computation
+                string serializedEvent = GetSerializedEvent();
                 
-                for (int j = 0; j < tag.Count; j++)
+                // Check if the ID matches what we compute from the serialized event
+                byte[] eventBytes = Encoding.UTF8.GetBytes(serializedEvent);
+                string computedId;
+                
+                using (var sha256 = SHA256.Create())
                 {
-                    sb.Append('"');
-                    sb.Append(tag[j]);
-                    sb.Append('"');
-                    
-                    if (j < tag.Count - 1)
-                    {
-                        sb.Append(',');
-                    }
+                    computedId = BitConverter.ToString(sha256.ComputeHash(eventBytes)).Replace("-", "").ToLowerInvariant();
                 }
                 
-                sb.Append(']');
+                bool idMatches = string.Equals(computedId, Id, StringComparison.OrdinalIgnoreCase);
+                Debug.Log($"DEEP DEBUG - ID check: {idMatches} (Computed: {computedId}, Expected: {Id})");
                 
-                if (i < Tags.Count - 1)
+                if (!idMatches)
                 {
-                    sb.Append(',');
+                    Debug.LogError("CRITICAL: Event ID does not match the hash of serialized event");
+                    return false;
                 }
+                
+                // Verify the signature using the hex string method
+                string keyForVerification = CompressedPublicKey ?? ("02" + PublicKey);
+                bool sigValid = NostrSigner.VerifySignatureHex(Id, Signature, keyForVerification);
+                
+                // Log the complete process
+                Debug.Log($"DEEP DEBUG - Complete verification result: {sigValid}");
+                Debug.Log($"DEEP DEBUG - Serialized: {serializedEvent}");
+                Debug.Log($"DEEP DEBUG - ID: {Id}");
+                Debug.Log($"DEEP DEBUG - PubKey: {PublicKey}");
+                Debug.Log($"DEEP DEBUG - CompressedPubKey: {keyForVerification}");
+                Debug.Log($"DEEP DEBUG - Sig: {Signature}");
+                
+                return sigValid;
             }
-            
-            sb.Append(']');
-            return sb.ToString();
+            catch (Exception ex)
+            {
+                Debug.LogError($"DEEP DEBUG - Verification error: {ex.Message}");
+                return false;
+            }
         }
     }
 } 
