@@ -1,0 +1,37 @@
+{
+    "name": "com.nostrgamer.unitysdk",
+    "version": "1.0.0",
+    "displayName": "Nostr Unity SDK",
+    "description": "A Unity SDK for interacting with the Nostr protocol",
+    "unity": "2021.3",
+    "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.0.2",
+        "com.unity.modules.jsonserialize": "1.0.0"
+    },
+    "keywords": [
+        "nostr",
+        "cryptography",
+        "websocket",
+        "relay"
+    ],
+    "author": {
+        "name": "NostrGamer",
+        "email": "nostrgamer@protonmail.com",
+        "url": "https://github.com/nostrgamer"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/nostrgamer/Csharp_Nostr_Unity_SDK.git"
+    },
+    "license": "MIT",
+    "samples": [
+        {
+            "displayName": "Basic Usage",
+            "description": "Basic example of using the Nostr SDK",
+            "path": "Samples~/BasicUsage"
+        }
+    ],
+    "files": [
+        "Runtime/Scripts/NostrUnity.asmdef"
+    ]
+} 

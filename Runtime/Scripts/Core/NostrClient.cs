@@ -10,18 +10,25 @@ using UnityEngine.Networking;
 using Newtonsoft.Json;
 using Nostr.Unity.Utils;
 using Newtonsoft.Json.Linq;
+using NostrUnity.Models;
+using System.Text.Json;
+using NostrUnity.Crypto;
+using System.Linq;
 
-namespace Nostr.Unity
+namespace NostrUnity.Core
 {
     /// <summary>
     /// Main client for interacting with Nostr network
     /// </summary>
     public class NostrClient : MonoBehaviour
     {
-        private readonly List<ClientWebSocket> _webSockets = new List<ClientWebSocket>();
+        private ClientWebSocket _webSocket;
+        private CancellationTokenSource _cts;
+        private bool _isConnected;
+        private readonly object _lock = new object();
+        
         private readonly List<string> _relayUrls = new List<string>();
         private readonly Dictionary<string, List<Action<NostrEvent>>> _subscriptions = new Dictionary<string, List<Action<NostrEvent>>>();
-        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
         
         private const int RECONNECT_DELAY_MS = 5000;
         private const int MAX_RECONNECT_ATTEMPTS = 3;
@@ -50,9 +57,35 @@ namespace Nostr.Unity
         public event EventHandler<string> Error;
 
         /// <summary>
+        /// Event triggered when a message is sent to a relay
+        /// </summary>
+        public event EventHandler<string> MessageSent;
+
+        /// <summary>
+        /// Event triggered when connection status changes
+        /// </summary>
+        public event EventHandler<bool> ConnectionStatusChanged;
+
+        /// <summary>
         /// Gets a value indicating whether the client is connected to any relay
         /// </summary>
-        public bool IsConnected => _webSockets.Count > 0;
+        public bool IsConnected
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _isConnected;
+                }
+            }
+            private set
+            {
+                lock (_lock)
+                {
+                    _isConnected = value;
+                }
+            }
+        }
         
         /// <summary>
         /// Gets the list of connected relay URLs
@@ -64,114 +97,142 @@ namespace Nostr.Unity
         /// </summary>
         public NostrClient()
         {
-            // Initialize any other necessary components
+            _webSocket = new ClientWebSocket();
+            _cts = new CancellationTokenSource();
         }
         
         /// <summary>
         /// Connects to a Nostr relay
         /// </summary>
-        /// <param name="relayUrl">The WebSocket URL of the relay</param>
-        /// <param name="onComplete">Callback for when the connection is complete</param>
-        /// <returns>True if the connection was successful</returns>
-        public IEnumerator ConnectToRelay(string relayUrl, Action<bool> onComplete = null)
+        /// <param name="relayUri">The WebSocket URI of the relay (e.g., "wss://relay.damus.io")</param>
+        public async Task ConnectAsync(string relayUri)
         {
-            if (string.IsNullOrEmpty(relayUrl))
-            {
-                onComplete?.Invoke(false);
-                yield break;
-            }
-            if (_relayUrls.Contains(relayUrl))
-            {
-                onComplete?.Invoke(true);
-                yield break;
-            }
-            bool connected = false;
-            Exception connectionError = null;
-            var ws = new ClientWebSocket();
-            Task connectTask = null;
             try
             {
-                connectTask = ws.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                if (IsConnected)
+                {
+                    Debug.LogWarning("Already connected to relay");
+                    return;
+                }
+
+                await _webSocket.ConnectAsync(new Uri(relayUri), _cts.Token);
+                _relayUrls.Add(relayUri);
+                IsConnected = true;
+                Connected?.Invoke(this, relayUri);
+                
+                Debug.Log($"Connected to {relayUri}");
+                _ = ReceiveMessagesAsync();
             }
             catch (Exception ex)
             {
-                connectionError = ex;
+                Debug.LogError($"Failed to connect to relay: {ex.Message}");
+                Error?.Invoke(this, $"Connection failed: {ex.Message}");
+                throw;
             }
-            if (connectTask != null)
-            {
-                while (!connectTask.IsCompleted)
-                {
-                    yield return null;
-                }
-                if (connectTask.IsFaulted)
-                {
-                    connectionError = connectTask.Exception;
-                }
-                else
-                {
-                    connected = true;
-                }
-            }
-            if (connected)
-            {
-                _webSockets.Add(ws);
-                _relayUrls.Add(relayUrl);
-                StartCoroutine(ReceiveMessagesCoroutine(ws, relayUrl));
-                Connected?.Invoke(this, relayUrl);
-            }
-            else if (connectionError != null)
-            {
-                Debug.LogError($"Error connecting to relay {relayUrl}: {connectionError.Message}");
-                Error?.Invoke(this, $"Error connecting to relay {relayUrl}: {connectionError.Message}");
-            }
-            onComplete?.Invoke(connected);
         }
         
         /// <summary>
-        /// Disconnects from all relays
+        /// Publishes a Nostr event to the relay
         /// </summary>
-        /// <param name="onComplete">Callback for when the disconnection is complete</param>
-        /// <returns>True if the disconnection was successful</returns>
-        public IEnumerator Disconnect(Action onComplete = null)
+        /// <param name="ev">The event to publish</param>
+        public async Task PublishEvent(NostrEvent ev)
         {
-            _cancellationTokenSource.Cancel();
-            
-            List<string> disconnectedRelays = new List<string>(_relayUrls);
-            
-            foreach (var ws in _webSockets)
+            if (!IsConnected)
             {
-                Task closeTask = null;
+                throw new InvalidOperationException("Not connected to relay");
+            }
+
+            try
+            {
+                // Create the event message
+                var message = new
+                {
+                    type = "EVENT",
+                    event_data = ev
+                };
+
+                string json = System.Text.Json.JsonSerializer.Serialize(message);
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+                Debug.Log($"Published event: {ev.Id}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to publish event: {ex.Message}");
+                Error?.Invoke(this, $"Publish failed: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Receives messages from the relay
+        /// </summary>
+        private async Task ReceiveMessagesAsync()
+        {
+            var buffer = new byte[4096];
+            
+            while (IsConnected)
+            {
                 try
                 {
-                    if (ws.State == WebSocketState.Open)
+                    var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
+                    if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        closeTask = ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+                        IsConnected = false;
+                        Debug.Log("Connection closed by server");
+                        Disconnected?.Invoke(this, _relayUrls[0]);
+                        break;
                     }
+
+                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    Debug.Log($"Received message: {message}");
+                    HandleMessage(message, _relayUrls[0]);
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"Error closing WebSocket: {ex.Message}");
-                    Error?.Invoke(this, $"Error disconnecting: {ex.Message}");
-                }
-                if (closeTask != null)
-                {
-                    while (!closeTask.IsCompleted)
-                    {
-                        yield return null;
-                    }
+                    Debug.LogError($"Error receiving messages: {ex.Message}");
+                    IsConnected = false;
+                    break;
                 }
             }
-            
-            // Notify disconnection for each relay
-            foreach (var relayUrl in disconnectedRelays)
+        }
+        
+        /// <summary>
+        /// Disconnects from the relay
+        /// </summary>
+        public async Task DisconnectAsync()
+        {
+            try
             {
-                Disconnected?.Invoke(this, relayUrl);
+                if (!IsConnected)
+                {
+                    return;
+                }
+
+                _cts.Cancel();
+                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
+                IsConnected = false;
+                Disconnected?.Invoke(this, _relayUrls[0]);
             }
-            
-            _webSockets.Clear();
-            _relayUrls.Clear();
-            _subscriptions.Clear();
-            onComplete?.Invoke();
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error during disconnect: {ex.Message}");
+                Error?.Invoke(this, $"Disconnect error: {ex.Message}");
+            }
+            finally
+            {
+                _webSocket.Dispose();
+                _webSocket = new ClientWebSocket();
+                _cts = new CancellationTokenSource();
+                _relayUrls.Clear();
+                _subscriptions.Clear();
+                Debug.Log("Disconnected");
+            }
+        }
+
+        private void OnDestroy()
+        {
+            DisconnectAsync().Wait();
         }
         
         /// <summary>
@@ -189,12 +250,12 @@ namespace Nostr.Unity
                 throw new ArgumentNullException(nameof(nostrEvent));
             if (string.IsNullOrEmpty(nostrEvent.Id))
                 throw new ArgumentException("Event ID cannot be null or empty", nameof(nostrEvent));
-            if (string.IsNullOrEmpty(nostrEvent.Signature))
+            if (string.IsNullOrEmpty(nostrEvent.Sig))
                 throw new ArgumentException("Event signature cannot be null or empty", nameof(nostrEvent));
                 
             // Double-check signature before sending
             Debug.Log($"[DEBUG] Pre-publish verification check for event {nostrEvent.Id}");
-            bool verificationResult = nostrEvent.VerifySignature();
+            bool verificationResult = NostrCrypto.VerifySignature(nostrEvent.Pubkey, nostrEvent.Id, nostrEvent.Sig);
             Debug.Log($"[DEBUG] Local signature verification result: {verificationResult}");
             
             if (!verificationResult)
@@ -202,14 +263,14 @@ namespace Nostr.Unity
                 Debug.LogError("[DEBUG] ⚠️ Event signature verification failed - relays will reject this event!");
                 Debug.LogError("[DEBUG] This usually means the private key doesn't match the public key used in the event.");
                 Debug.LogError($"[DEBUG] Event ID: {nostrEvent.Id}");
-                Debug.LogError($"[DEBUG] Public Key: {nostrEvent.PublicKey}");
-                Debug.LogError($"[DEBUG] Signature: {nostrEvent.Signature}");
+                Debug.LogError($"[DEBUG] Public Key: {nostrEvent.Pubkey}");
+                Debug.LogError($"[DEBUG] Signature: {nostrEvent.Sig}");
                 throw new ArgumentException("Event signature verification failed", nameof(nostrEvent));
             }
             
             Debug.Log($"[DEBUG] Publishing event with ID: {nostrEvent.Id}");
-            Debug.Log($"[DEBUG] Event public key: {nostrEvent.PublicKey}");
-            Debug.Log($"[DEBUG] Event signature: {nostrEvent.Signature}");
+            Debug.Log($"[DEBUG] Event public key: {nostrEvent.Pubkey}");
+            Debug.Log($"[DEBUG] Event signature: {nostrEvent.Sig}");
             Debug.Log($"[DEBUG] Event kind: {nostrEvent.Kind}");
             Debug.Log($"[DEBUG] Event timestamp: {nostrEvent.CreatedAt}");
             
@@ -238,14 +299,14 @@ namespace Nostr.Unity
                 yield break;
             }
             
-            if (_webSockets.Count == 0)
+            if (_relayUrls.Count == 0)
             {
                 Debug.LogWarning("[DEBUG] No connected relays to publish event to");
                 onComplete?.Invoke(false);
                 yield break;
             }
             
-            Debug.Log($"[DEBUG] Attempting to publish to {_webSockets.Count} relays...");
+            Debug.Log($"[DEBUG] Attempting to publish to {_relayUrls.Count} relays...");
             
             // Track responses from each relay
             Dictionary<string, string> relayResponses = new Dictionary<string, string>();
@@ -255,15 +316,14 @@ namespace Nostr.Unity
             _eventErrors.Remove(nostrEvent.Id);
             
             // Initiate sending to all connected relays
-            for (int i = 0; i < _webSockets.Count; i++)
+            for (int i = 0; i < _relayUrls.Count; i++)
             {
-                var webSocket = _webSockets[i];
                 string relayUrl = i < _relayUrls.Count ? _relayUrls[i] : "unknown";
                 
-                if (webSocket.State != WebSocketState.Open)
+                if (!IsConnected)
                 {
-                    Debug.LogWarning($"[DEBUG] Skipping {relayUrl} - WebSocket state is {webSocket.State}");
-                    relayResponses[relayUrl] = $"WebSocket not open (state: {webSocket.State})";
+                    Debug.LogWarning($"[DEBUG] Skipping {relayUrl} - WebSocket state is {_webSocket.State}");
+                    relayResponses[relayUrl] = $"WebSocket not open (state: {_webSocket.State})";
                     continue;
                 }
                 
@@ -273,11 +333,11 @@ namespace Nostr.Unity
                     byte[] messageBytes = Encoding.UTF8.GetBytes(jsonMessage);
                     
                     // Create a new task for this send operation
-                    var sendTask = webSocket.SendAsync(
+                    var sendTask = _webSocket.SendAsync(
                         new ArraySegment<byte>(messageBytes),
                         WebSocketMessageType.Text,
                         true,
-                        _cancellationTokenSource.Token
+                        _cts.Token
                     );
                     
                     sendTasks.Add(sendTask);
@@ -385,7 +445,7 @@ namespace Nostr.Unity
         {
             var buffer = new byte[4096];
             int reconnectAttempts = 0;
-            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+            while (!_cts.Token.IsCancellationRequested)
             {
                 bool shouldReconnect = false;
                 bool hasError = false;
@@ -428,7 +488,7 @@ namespace Nostr.Unity
                     
                     try
                     {
-                        reconnectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cancellationTokenSource.Token);
+                        reconnectTask = webSocket.ConnectAsync(new Uri(relayUrl), _cts.Token);
                         reconnectStarted = true;
                     }
                     catch (Exception ex)
@@ -452,7 +512,7 @@ namespace Nostr.Unity
                 
                 try
                 {
-                    receiveTask = webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
+                    receiveTask = webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
                     receiveStarted = true;
                 }
                 catch (Exception ex)
@@ -718,13 +778,13 @@ namespace Nostr.Unity
         {
             byte[] messageBytes = Encoding.UTF8.GetBytes(message);
             
-            foreach (var webSocket in _webSockets)
+            foreach (var webSocket in _relayUrls.Select(url => _webSocket))
             {
                 try
                 {
                     if (webSocket.State == WebSocketState.Open)
                     {
-                        webSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+                        webSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, _cts.Token);
                     }
                 }
                 catch (Exception ex)
