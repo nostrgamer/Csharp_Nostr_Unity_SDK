@@ -61,7 +61,12 @@ namespace NostrUnity.Crypto
 
             var ctx = new Context();
             var secKey = ECPrivKey.Create(privateKey);
-            return secKey.CreatePubKey().ToBytes();
+            var pubKey = secKey.CreatePubKey();
+            
+            // Get the X coordinate of the public key (32 bytes)
+            // For Nostr, we need the X coordinate of the public key
+            var xOnlyPubKey = pubKey.ToXOnlyPubKey();
+            return xOnlyPubKey.ToBytes();
         }
 
         /// <summary>
@@ -134,30 +139,14 @@ namespace NostrUnity.Crypto
                         return false;
                     }
                     
-                    // Create ECPubKey from bytes (this should be available in all versions)
+                    // Create pubkey from the 32-byte public key
                     var pubKey = ECPubKey.Create(publicKeyBytes);
                     
-                    // Since we can't directly verify a Schnorr signature with this version of the library,
-                    // we'll use the library's built-in signature verification if available
-                    // or resort to a basic check for now
+                    // Create Schnorr signature from bytes
+                    var schnorrSig = new SecpSchnorrSignature(signatureBytes);
                     
-                    // NOTE: This is not a complete verification! It's just a placeholder until
-                    // we can implement proper BIP-340 Schnorr verification using direct methods
-                    // or by replacing the library with a more specialized one.
-                    
-                    // For production use, consider using a dedicated Nostr library
-                    // like NNostr or implementing the full BIP-340 algorithm
-                    
-                    Debug.LogWarning("⚠️ Using basic signature validation - only checks format, not cryptographic validity");
-                    
-                    // Verify signature has valid R and s values (first 32 bytes are R, last 32 bytes are s)
-                    byte[] r = new byte[32];
-                    byte[] s = new byte[32];
-                    Array.Copy(signatureBytes, 0, r, 0, 32);
-                    Array.Copy(signatureBytes, 32, s, 0, 32);
-                    
-                    // Ensure r and s are non-zero and within the curve order
-                    return !r.All(b => b == 0) && !s.All(b => b == 0);
+                    // Verify the signature
+                    return pubKey.SigVerifyBIP340(eventIdBytes, schnorrSig);
                 }
                 catch (Exception ex)
                 {
@@ -247,6 +236,13 @@ namespace NostrUnity.Crypto
                 Debug.LogError($"Error encoding nsec: {ex.Message}");
                 throw;
             }
+        }
+
+        public static string GetPublicKey(string privateKeyHex)
+        {
+            byte[] privateKeyBytes = HexToBytes(privateKeyHex);
+            byte[] publicKeyBytes = GetPublicKey(privateKeyBytes);
+            return BitConverter.ToString(publicKeyBytes).Replace("-", "").ToLowerInvariant();
         }
     }
 
