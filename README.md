@@ -9,8 +9,11 @@ A Unity SDK for interacting with the Nostr protocol, providing easy-to-use funct
 - Key pair generation and management
 - Bech32 encoding for npub/nsec keys
 - Event creation and signing
+- NIP-19 support (note, npub, nsec)
 - Simple API for posting text notes
 - Support for both hex and nsec format private keys
+- View event links for multiple Nostr web clients
+- Relay connection management
 
 ## Requirements
 
@@ -40,97 +43,9 @@ A Unity SDK for interacting with the Nostr protocol, providing easy-to-use funct
 ## Quick Start
 
 1. Create a new GameObject in your scene
-2. Add the `NostrManager` component to it
-3. Use the following code to get started:
-
-```csharp
-using NostrUnity;
-
-public class YourScript : MonoBehaviour
-{
-    private NostrManager _nostrManager;
-
-    void Start()
-    {
-        // Initialize with a new key pair
-        _nostrManager = gameObject.AddComponent<NostrManager>();
-        _nostrManager.Initialize();
-
-        // Or initialize with an existing private key (hex or nsec format)
-        // _nostrManager.Initialize("your_private_key_here");
-
-        // Post a text note
-        _nostrManager.PostTextNote("Hello from Unity!", "wss://relay.damus.io");
-    }
-}
-```
-
-## Basic Usage
-
-### Key Management
-
-```csharp
-// Generate a new key pair
-_nostrManager.Initialize();
-
-// Get your public key in npub format
-string npub = _nostrManager.GetNpub();
-
-// Get your private key in nsec format
-string nsec = _nostrManager.GetNsec();
-
-// You can use either hex format or nsec format for private keys
-_nostrManager.Initialize("nsec1..."); // Using nsec format
-_nostrManager.Initialize("a1b2c3..."); // Using hex format
-```
-
-### Posting Notes
-
-```csharp
-// Post a text note to a relay
-await _nostrManager.PostTextNote("Your message here", "wss://relay.damus.io");
-```
-
-### Event Handling
-
-```csharp
-// Subscribe to events
-_nostrManager.OnConnected += (relay) => Debug.Log($"Connected to {relay}");
-_nostrManager.OnDisconnected += (relay) => Debug.Log($"Disconnected from {relay}");
-_nostrManager.OnError += (error) => Debug.LogError($"Error: {error}");
-_nostrManager.OnEventReceived += (ev) => Debug.Log($"Received event: {ev.Content}");
-```
-
-## Example Components
-
-### NostrEventTest
-
-The package includes a `NostrEventTest` component that demonstrates basic Nostr event creation and posting:
-
-1. Add the `NostrEventTest` component to a GameObject in your scene
-2. Configure the component in the Inspector:
-   - Enter your private key (supports both hex and nsec formats)
-   - Check "Use Provided Key" to use your key (or leave unchecked to generate a new key)
-   - Set relay URLs to connect to
-   - Adjust other settings as needed
-3. Run the scene to connect to relays and post a test message
-
-This component is great for testing connectivity and verifying your keys work with Nostr relays.
-
-### Example Scene
-
-The package also includes a basic example scene demonstrating the SDK's functionality:
-
-1. Open the Package Manager
-2. Find the Nostr Unity SDK
-3. Click "Import" under the "Samples" section
-4. Open the "Basic Usage" scene from the Samples folder
-
-The example scene includes:
-- Text input for messages
-- Send button
-- Status display
-- Public key display
+2. Add the NostrPublishExample.cs script to it
+3. Input your nsec
+4. Modify the relays, as needed
 
 ## Troubleshooting
 

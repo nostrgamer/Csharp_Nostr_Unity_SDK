@@ -40,6 +40,8 @@ namespace NostrUnity.Examples
         [SerializeField] private string privateKeyInput; // Set this in the Unity Inspector
         [Tooltip("Whether to use the private key provided above")]
         [SerializeField] private bool useProvidedKey = false; // Use the key provided in the inspector
+        [Tooltip("If provided, verify that we derive this expected npub from the private key")]
+        [SerializeField] private string expectedNpub; // Expected npub for verification
         
         private NostrWebSocketService _webSocketService;
         private string privateKeyHex; // Store the converted or generated private key
@@ -49,48 +51,16 @@ namespace NostrUnity.Examples
         private int _connectedRelays = 0;
         private bool _eventCreated = false;
         private string _lastEventJson = null;
+        private bool _keysVerified = false;
 
         private void Start()
         {
             // Use provided key or generate a new one
             if (useProvidedKey && !string.IsNullOrEmpty(privateKeyInput))
             {
-                // Convert nsec to hex if needed
-                if (privateKeyInput.StartsWith("nsec1"))
+                if (!LoadAndVerifyProvidedKey())
                 {
-                    try
-                    {
-                        privateKeyHex = NostrCrypto.DecodeNsec(privateKeyInput);
-                        Debug.Log($"Converted nsec to hex: {privateKeyHex}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"Error converting nsec to hex: {ex.Message}");
-                        Debug.LogError("Generating new key pair instead.");
-                        GenerateNewKeyPair();
-                        return;
-                    }
-                }
-                else
-                {
-                    // Assume it's already in hex format
-                    privateKeyHex = privateKeyInput;
-                }
-
-                try
-                {
-                    // Derive the public key from the private key
-                    publicKeyHex = NostrCrypto.GetPublicKey(privateKeyHex);
-                    
-                    Debug.Log($"Using provided key:");
-                    Debug.Log($"Public Key: {publicKeyHex}");
-                    string npub = NostrCrypto.GetNpub(publicKeyHex);
-                    Debug.Log($"Calculated Npub: {npub}");
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error using provided key: {ex.Message}");
-                    Debug.LogError("Generating new key pair instead.");
+                    Debug.LogError("Key verification failed, generating new keys instead");
                     GenerateNewKeyPair();
                 }
             }
@@ -108,6 +78,99 @@ namespace NostrUnity.Examples
             
             // Start a timer to check connections and create event after timeout
             StartCoroutine(WaitForRelaysAndCreateEvent());
+        }
+
+        private bool LoadAndVerifyProvidedKey()
+        {
+            try
+            {
+                // Convert nsec to hex if needed
+                if (privateKeyInput.StartsWith("nsec1"))
+                {
+                    try
+                    {
+                        Debug.Log($"Attempting to decode nsec: {privateKeyInput}");
+                        privateKeyHex = NostrCrypto.DecodeNsec(privateKeyInput);
+                        Debug.Log($"Successfully decoded nsec to hex: {privateKeyHex}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Failed to decode nsec: {ex.Message}");
+                        Debug.LogError($"Full exception: {ex}");
+                        return false;
+                    }
+                }
+                else
+                {
+                    // Assume it's already in hex format
+                    privateKeyHex = privateKeyInput;
+                    Debug.Log($"Using provided hex private key: {privateKeyHex}");
+                }
+
+                // Derive the public key from the private key
+                Debug.Log($"Deriving public key from private key hex: {privateKeyHex}");
+                publicKeyHex = NostrCrypto.GetPublicKey(privateKeyHex);
+                
+                Debug.Log($"Using provided key:");
+                Debug.Log($"Public Key: {publicKeyHex}");
+                string npub = NostrCrypto.GetNpub(publicKeyHex);
+                Debug.Log($"Calculated Npub: {npub}");
+                
+                // Verify the npub if expected npub is provided
+                if (!string.IsNullOrEmpty(expectedNpub))
+                {
+                    // Check if the expectedNpub matches what we derived
+                    bool npubMatches = NostrCrypto.VerifyNpubMatchesHex(expectedNpub, publicKeyHex);
+                    
+                    if (!npubMatches)
+                    {
+                        Debug.LogError("The private key provided does not derive the expected npub.");
+                        Debug.LogError("This means your events will be posted with a DIFFERENT IDENTITY than expected.");
+                        
+                        // Try to decode the expected npub to see what hex it produces
+                        try 
+                        {
+                            string expectedHex = NostrCrypto.GetHexFromNpub(expectedNpub);
+                            Debug.LogError($"Expected public key hex: {expectedHex}");
+                            Debug.LogError($"Actual public key hex:   {publicKeyHex}");
+                            
+                            // If it's the test key showing up, indicate that
+                            if (publicKeyHex == "fc4591c47d0fd09a85198ee098ab44d24407b39d6792dbc938be6421ccf15761")
+                            {
+                                Debug.LogError("IMPORTANT: You appear to be using the test key instead of your own key!");
+                                Debug.LogError("This suggests the nsec decoding is failing and falling back to the test key.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Could not decode expected npub: {ex.Message}");
+                        }
+                        
+                        return false;
+                    }
+                    else
+                    {
+                        Debug.Log("✓ Key verification successful! Expected npub matches calculated npub.");
+                        _keysVerified = true;
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("No expected npub provided for verification. Using calculated npub: " + npub);
+                    Debug.LogWarning("If this is not correct, please set the expectedNpub field in the inspector.");
+                    _keysVerified = true; // Consider it verified if no expected npub is provided
+                }
+                
+                Debug.Log($"IMPORTANT: Make sure you check this profile for events: {npub}");
+                Debug.Log($"Profile URL: https://snort.social/p/{npub}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error using provided key: {ex.Message}");
+                Debug.LogError($"Full exception: {ex}");
+                return false;
+            }
         }
 
         private void GenerateNewKeyPair()
@@ -189,6 +252,31 @@ namespace NostrUnity.Examples
                         if (!string.IsNullOrEmpty(_lastPublishedEventId) && message.Contains(_lastPublishedEventId))
                         {
                             Debug.Log($"Found our event on relay: {relayUrl}");
+                            Debug.Log($"Event note ID: {NostrCrypto.GetNoteId(_lastPublishedEventId)} - Search for this in Nostr clients");
+                        }
+                        
+                        // Check if it's an EVENT message
+                        if (message.StartsWith("[\"EVENT\""))
+                        {
+                            try
+                            {
+                                // Extract the event ID from the message if possible
+                                var eventArray = JsonConvert.DeserializeObject<object[]>(message);
+                                if (eventArray != null && eventArray.Length >= 3)
+                                {
+                                    var eventObj = JsonConvert.DeserializeObject<NostrEvent>(eventArray[2].ToString());
+                                    if (eventObj != null && !string.IsNullOrEmpty(eventObj.id))
+                                    {
+                                        Debug.Log($"Received event with ID: {eventObj.id}");
+                                        Debug.Log($"Event note ID: {NostrCrypto.GetNoteId(eventObj.id)}");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // Just a parsing error, not critical
+                                Debug.LogWarning($"Error parsing event data: {ex.Message}");
+                            }
                         }
                     },
                     onError: (error) => 
@@ -205,6 +293,30 @@ namespace NostrUnity.Examples
 
         private void CreateAndSignTestEvent()
         {
+            // Double-check key verification before sending
+            if (!_keysVerified)
+            {
+                Debug.LogError("⚠️ Keys not verified! Events may be sent with incorrect identity.");
+                Debug.LogError("Please provide expectedNpub in the inspector to verify keys before sending.");
+                
+                // If expected npub is provided, do a last chance verification
+                if (!string.IsNullOrEmpty(expectedNpub))
+                {
+                    string currentNpub = NostrCrypto.GetNpub(publicKeyHex);
+                    if (currentNpub != expectedNpub)
+                    {
+                        Debug.LogError("🛑 STOPPING EVENT CREATION: Key mismatch detected!");
+                        Debug.LogError($"Expected npub: {expectedNpub}");
+                        Debug.LogError($"Current npub:  {currentNpub}");
+                        Debug.LogError("Please fix your keys before posting events.");
+                        return; // Don't create the event
+                    }
+                }
+                
+                // Give a warning but continue anyway if no expected npub
+                Debug.LogWarning("Continuing with unverified keys...");
+            }
+            
             try
             {
                 Debug.Log("Starting event creation...");
@@ -246,6 +358,8 @@ namespace NostrUnity.Examples
                 Debug.Log($"Values that will be verified by relays:");
                 Debug.Log($"Public key (npub): {npubFromHex}");
                 Debug.Log($"Event ID (hex): {eventData.id} (length: {eventData.id.Length})");
+                string noteId = NostrCrypto.GetNoteId(eventData.id);
+                Debug.Log($"Event ID (NIP-19): {noteId} - Use this to search for your event in Nostr clients");
                 Debug.Log($"Signature (hex): {eventData.sig} (length: {eventData.sig.Length})");
                 
                 // Verify the event ID was correctly calculated
@@ -299,6 +413,8 @@ namespace NostrUnity.Examples
             yield return new WaitForSeconds(delay);
             
             Debug.Log("Verifying event was published and can be retrieved...");
+            string noteId = NostrCrypto.GetNoteId(eventId);
+            Debug.Log($"Looking up event: {noteId} - Use this ID in Nostr clients to find your message");
             
             try 
             {

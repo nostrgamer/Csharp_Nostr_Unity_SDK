@@ -168,14 +168,27 @@ namespace NostrUnity.Models
                 
                 Debug.Log($"[DEBUG] Signing event with ID: {Id}");
                 
-                // Get the NostrSigner to sign the event
+                // Get the public keys to verify consistency
                 var keyManager = new NostrKeyManager();
-                string publicKey = keyManager.GetPublicKey(privateKey, true);
-                Debug.Log($"[DEBUG] Public key used for signing (hex): {publicKey}");
                 
-                // Log whether we have a compressed public key
-                Debug.Log($"[DEBUG] CompressedPublicKey available: {!string.IsNullOrEmpty(CompressedPublicKey)}");
-                Debug.Log($"[DEBUG] PublicKey value: {Pubkey}");
+                // Get both formats of the public key
+                string xOnlyPublicKey = keyManager.GetPublicKey(privateKey, false);  // x-only (32 bytes)
+                string compressedPublicKey = keyManager.GetPublicKey(privateKey, true);  // compressed (33 bytes with prefix)
+                
+                Debug.Log($"[DEBUG] Derived x-only public key: {xOnlyPublicKey}");
+                Debug.Log($"[DEBUG] Derived compressed public key: {compressedPublicKey}");
+                
+                // Verify the event's public key matches the one derived from the private key
+                if (!string.Equals(Pubkey, xOnlyPublicKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.LogError($"[DEBUG] WARNING: The public key in the event ({Pubkey}) doesn't match the one derived from the private key ({xOnlyPublicKey})");
+                    Debug.LogError("[DEBUG] This event may be rejected by relays if signed with mismatched key");
+                    // We continue anyway as this might be intentional in some cases
+                }
+                
+                // Store the compressed public key for verification
+                CompressedPublicKey = compressedPublicKey;
+                Debug.Log($"[DEBUG] Stored compressed public key: {CompressedPublicKey}");
                 
                 // Sign the event ID with the private key
                 Sig = NostrCrypto.SignEvent(Id, privateKey);
@@ -194,10 +207,8 @@ namespace NostrUnity.Models
                     Debug.LogError($"[DEBUG] Compressed Public Key: {CompressedPublicKey}");
                     Debug.LogError($"[DEBUG] Signature: {Sig}");
                     // Try to verify with alternate key formats
-                    string derivedPublicKey = keyManager.GetPublicKey(privateKey, false);
-                    string derivedCompressedKey = keyManager.GetPublicKey(privateKey, true);
-                    Debug.LogError($"[DEBUG] Derived Public Key: {derivedPublicKey}");
-                    Debug.LogError($"[DEBUG] Derived Compressed Key: {derivedCompressedKey}");
+                    Debug.LogError($"[DEBUG] Derived x-only Public Key: {xOnlyPublicKey}");
+                    Debug.LogError($"[DEBUG] Derived Compressed Key: {compressedPublicKey}");
                 }
             }
             catch (Exception ex)
@@ -241,43 +252,80 @@ namespace NostrUnity.Models
                 Debug.Log($"[DEBUG] Using compressed public key: {CompressedPublicKey ?? "Not available"}");
                 Debug.Log($"[DEBUG] Signature to verify: {Sig}");
                 
-                // Use compressed key if available, otherwise try standard key format for verification
+                // First check if we have a valid public key length
+                if (Pubkey.Length != 64)
+                {
+                    Debug.LogError($"[DEBUG] Invalid public key length: {Pubkey.Length} (expected 64 chars for x-only key)");
+                    return false;
+                }
+                
+                // Try direct verification first with x-only public key format
+                try
+                {
+                    bool resultDirect = NostrCrypto.VerifySignature(Id, Sig, Pubkey);
+                    if (resultDirect)
+                    {
+                        Debug.Log($"[DEBUG] Direct x-only key verification succeeded");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[DEBUG] Direct x-only verification failed: {ex.Message}");
+                }
+                
+                // Try with compressed key formats if available
                 if (!string.IsNullOrEmpty(CompressedPublicKey))
                 {
-                    Debug.Log($"[DEBUG] Using pre-stored compressed public key for verification");
-                    bool result = NostrCrypto.VerifySignature(Id, Sig, CompressedPublicKey);
-                    Debug.Log($"[DEBUG] Standard signature verification result: {result}");
-                    return result;
+                    try
+                    {
+                        Debug.Log($"[DEBUG] Using pre-stored compressed public key for verification");
+                        bool result = NostrCrypto.VerifySignature(Id, Sig, CompressedPublicKey);
+                        Debug.Log($"[DEBUG] Compressed key verification result: {result}");
+                        if (result) return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[DEBUG] Compressed key verification failed: {ex.Message}");
+                    }
                 }
                 
-                // If we don't have a compressed key stored, try both standard compression prefixes
-                string pubKey02 = "02" + Pubkey;
-                string pubKey03 = "03" + Pubkey;
-                
-                Debug.Log($"[DEBUG] No compressed key available, trying with 02 prefix");
-                bool result02 = NostrCrypto.VerifySignature(Id, Sig, pubKey02);
-                
-                if (result02)
+                // Try both standard compression prefixes as a fallback
+                try
                 {
-                    // If verification passed with 02 prefix, store it for future use
-                    CompressedPublicKey = pubKey02;
-                    Debug.Log($"[DEBUG] Verification successful with 02 prefix, stored for future use");
-                    return true;
+                    // If we don't have a compressed key stored, try both standard compression prefixes
+                    string pubKey02 = "02" + Pubkey;
+                    
+                    Debug.Log($"[DEBUG] Trying with 02 prefix");
+                    bool result02 = NostrCrypto.VerifySignature(Id, Sig, pubKey02);
+                    
+                    if (result02)
+                    {
+                        // If verification passed with 02 prefix, store it for future use
+                        CompressedPublicKey = pubKey02;
+                        Debug.Log($"[DEBUG] Verification successful with 02 prefix, stored for future use");
+                        return true;
+                    }
+                    
+                    Debug.Log($"[DEBUG] Trying with 03 prefix");
+                    string pubKey03 = "03" + Pubkey;
+                    bool result03 = NostrCrypto.VerifySignature(Id, Sig, pubKey03);
+                    
+                    if (result03)
+                    {
+                        // If verification passed with 03 prefix, store it for future use
+                        CompressedPublicKey = pubKey03;
+                        Debug.Log($"[DEBUG] Verification successful with 03 prefix, stored for future use");
+                        return true;
+                    }
                 }
-                
-                Debug.Log($"[DEBUG] Trying with 03 prefix");
-                bool result03 = NostrCrypto.VerifySignature(Id, Sig, pubKey03);
-                
-                if (result03)
+                catch (Exception ex)
                 {
-                    // If verification passed with 03 prefix, store it for future use
-                    CompressedPublicKey = pubKey03;
-                    Debug.Log($"[DEBUG] Verification successful with 03 prefix, stored for future use");
-                    return true;
+                    Debug.LogWarning($"[DEBUG] Prefix-based verification failed: {ex.Message}");
                 }
                 
-                // Both prefixes failed
-                Debug.LogError("[DEBUG] Signature verification failed with both key prefixes");
+                // All verification attempts failed
+                Debug.LogError("[DEBUG] Signature verification failed with all key format attempts");
                 Debug.LogError("[DEBUG] This will likely cause relays to reject this event");
                 
                 return false;

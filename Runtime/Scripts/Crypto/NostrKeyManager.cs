@@ -27,10 +27,22 @@ namespace NostrUnity.Crypto
 
                 byte[] privateKeyBytes = HexToBytes(privateKeyHex);
                 var ctx = new Context();
-                var secKey = ECPrivKey.Create(privateKeyBytes);
-                var pubKey = secKey.CreatePubKey();
                 
-                return BitConverter.ToString(pubKey.ToBytes()).Replace("-", "").ToLowerInvariant();
+                if (!ECPrivKey.TryCreate(privateKeyBytes, out ECPrivKey privateKey))
+                    throw new ArgumentException("Invalid private key");
+                
+                if (compressed)
+                {
+                    // Get compressed public key (33 bytes with 02/03 prefix)
+                    var pubKey = privateKey.CreatePubKey();
+                    return BitConverter.ToString(pubKey.ToBytes()).Replace("-", "").ToLowerInvariant();
+                }
+                else
+                {
+                    // Get x-only public key (32 bytes) as used in NIP-01
+                    var xOnlyPubKey = privateKey.CreateXOnlyPubKey();
+                    return BitConverter.ToString(xOnlyPubKey.ToBytes()).Replace("-", "").ToLowerInvariant();
+                }
             }
             catch (Exception ex)
             {
@@ -47,16 +59,20 @@ namespace NostrUnity.Crypto
         {
             try
             {
-                byte[] privateKey = new byte[32];
-                _rng.GetBytes(privateKey);
+                byte[] privateKeyBytes = new byte[32];
+                _rng.GetBytes(privateKeyBytes);
                 
                 var ctx = new Context();
-                var secKey = ECPrivKey.Create(privateKey);
-                var pubKey = secKey.CreatePubKey();
+                
+                if (!ECPrivKey.TryCreate(privateKeyBytes, out ECPrivKey privateKey))
+                    throw new ArgumentException("Invalid generated private key");
+                
+                // Use x-only public key for consistency with verification
+                var xOnlyPubKey = privateKey.CreateXOnlyPubKey();
                 
                 return (
-                    BitConverter.ToString(privateKey).Replace("-", "").ToLowerInvariant(),
-                    BitConverter.ToString(pubKey.ToBytes()).Replace("-", "").ToLowerInvariant()
+                    BitConverter.ToString(privateKeyBytes).Replace("-", "").ToLowerInvariant(),
+                    BitConverter.ToString(xOnlyPubKey.ToBytes()).Replace("-", "").ToLowerInvariant()
                 );
             }
             catch (Exception ex)

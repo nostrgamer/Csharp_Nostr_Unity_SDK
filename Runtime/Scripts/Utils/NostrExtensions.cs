@@ -1,8 +1,10 @@
 using System;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using NostrUnity.Utils;
+using NostrUnity.Crypto;
 
-namespace Nostr.Unity.Utils
+namespace NostrUnity.Utils
 {
     /// <summary>
     /// Extension methods for Nostr related types
@@ -39,8 +41,8 @@ namespace Nostr.Unity.Utils
                 
             try
             {
-                (string prefix, _) = Bech32Util.DecodeToHex(key);
-                return prefix == NostrConstants.NPUB_PREFIX;
+                byte[] decoded = Bech32.Decode(key);
+                return key.StartsWith(NostrConstants.NPUB_PREFIX);
             }
             catch
             {
@@ -63,8 +65,8 @@ namespace Nostr.Unity.Utils
                 
             try
             {
-                (string prefix, _) = Bech32Util.DecodeToHex(key);
-                return prefix == NostrConstants.NSEC_PREFIX;
+                byte[] decoded = Bech32.Decode(key);
+                return key.StartsWith(NostrConstants.NSEC_PREFIX);
             }
             catch
             {
@@ -91,8 +93,8 @@ namespace Nostr.Unity.Utils
             {
                 try
                 {
-                    (_, string hexData) = Bech32Util.DecodeToHex(key);
-                    return hexData;
+                    byte[] decoded = Bech32.Decode(key);
+                    return NostrCrypto.BytesToHex(decoded);
                 }
                 catch (Exception ex)
                 {
@@ -127,7 +129,8 @@ namespace Nostr.Unity.Utils
             try
             {
                 // Convert from hex to npub
-                return Bech32Util.EncodeHex(NostrConstants.NPUB_PREFIX, hexKey);
+                byte[] data = NostrCrypto.HexToBytes(hexKey);
+                return Bech32.Encode(NostrConstants.NPUB_PREFIX, data);
             }
             catch (Exception ex)
             {
@@ -152,7 +155,10 @@ namespace Nostr.Unity.Utils
                 
             // Convert from hex to nsec
             if (IsValidHexKey(hexKey))
-                return Bech32Util.EncodeHex(NostrConstants.NSEC_PREFIX, hexKey);
+            {
+                byte[] data = NostrCrypto.HexToBytes(hexKey);
+                return Bech32.Encode(NostrConstants.NSEC_PREFIX, data);
+            }
                 
             throw new ArgumentException("Invalid key format", nameof(hexKey));
         }
