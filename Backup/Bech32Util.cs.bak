@@ -20,6 +20,8 @@ namespace Nostr.Unity.Utils
         // Bech32 checksum generator polynomial values
         private static readonly uint[] GENERATOR = { 0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3 };
         
+        private const int CHECKSUM_LENGTH = 6;
+        
         /// <summary>
         /// Encodes data with a human-readable prefix using Bech32 encoding
         /// </summary>
@@ -29,33 +31,29 @@ namespace Nostr.Unity.Utils
         public static string Encode(string hrp, byte[] data)
         {
             if (string.IsNullOrEmpty(hrp))
-                throw new ArgumentException("Human-readable prefix cannot be null or empty", nameof(hrp));
-            
+                throw new ArgumentException("Human-readable part cannot be null or empty", nameof(hrp));
             if (data == null || data.Length == 0)
                 throw new ArgumentException("Data cannot be null or empty", nameof(data));
-            
-            // Convert data to 5-bit values
-            byte[] converted = ConvertBits(data, 8, 5, true);
+
+            // Convert data to 5-bit groups
+            var data5Bit = ConvertTo5Bit(data);
             
             // Create checksum
-            byte[] checksum = CreateChecksum(hrp, converted);
+            var checksum = CreateChecksum(hrp, data5Bit);
             
-            // Build the encoded string
-            StringBuilder sb = new StringBuilder(hrp.Length + 1 + converted.Length + checksum.Length);
-            sb.Append(hrp);
-            sb.Append(SEPARATOR);
+            // Combine everything
+            var combined = new byte[data5Bit.Length + checksum.Length];
+            Array.Copy(data5Bit, 0, combined, 0, data5Bit.Length);
+            Array.Copy(checksum, 0, combined, data5Bit.Length, checksum.Length);
             
-            foreach (var b in converted)
+            // Convert to string
+            var result = new StringBuilder(hrp + "1");
+            foreach (var b in combined)
             {
-                sb.Append(CHARSET[b]);
+                result.Append(CHARSET[b]);
             }
             
-            foreach (var b in checksum)
-            {
-                sb.Append(CHARSET[b]);
-            }
-            
-            return sb.ToString();
+            return result.ToString();
         }
         
         /// <summary>
@@ -271,16 +269,25 @@ namespace Nostr.Unity.Utils
         /// </summary>
         private static byte[] CreateChecksum(string hrp, byte[] data)
         {
-            byte[] hrpExpanded = HrpExpand(hrp);
-            byte[] values = new byte[hrpExpanded.Length + data.Length + 6];
+            var values = new byte[hrp.Length + data.Length + CHECKSUM_LENGTH];
+            var hrpExpanded = new byte[hrp.Length * 2 + 1];
             
+            // Expand HRP
+            for (var i = 0; i < hrp.Length; i++)
+            {
+                var c = hrp[i];
+                hrpExpanded[i] = (byte)(c >> 5);
+                hrpExpanded[i + hrp.Length + 1] = (byte)(c & 31);
+            }
+            
+            // Copy data
             Array.Copy(hrpExpanded, 0, values, 0, hrpExpanded.Length);
             Array.Copy(data, 0, values, hrpExpanded.Length, data.Length);
             
-            uint polymod = Polymod(values) ^ 1;
-            byte[] checksum = new byte[6];
-            
-            for (int i = 0; i < 6; i++)
+            // Calculate checksum
+            var polymod = Polymod(values);
+            var checksum = new byte[CHECKSUM_LENGTH];
+            for (var i = 0; i < CHECKSUM_LENGTH; i++)
             {
                 checksum[i] = (byte)((polymod >> (5 * (5 - i))) & 31);
             }
@@ -325,21 +332,16 @@ namespace Nostr.Unity.Utils
         private static uint Polymod(byte[] values)
         {
             uint chk = 1;
-            
-            foreach (var value in values)
+            foreach (byte value in values)
             {
-                uint b = (chk >> 25);
+                uint top = chk >> 25;
                 chk = ((chk & 0x1ffffff) << 5) ^ value;
-                
                 for (int i = 0; i < 5; i++)
                 {
-                    if (((b >> i) & 1) == 1)
-                    {
+                    if (((top >> i) & 1) == 1)
                         chk ^= GENERATOR[i];
-                    }
                 }
             }
-            
             return chk;
         }
 
@@ -379,6 +381,33 @@ namespace Nostr.Unity.Utils
                 Debug.LogError($"Error decoding Bech32 key: {ex.Message}");
                 return null;
             }
+        }
+
+        private static byte[] ConvertTo5Bit(byte[] data)
+        {
+            var result = new byte[data.Length * 8 / 5 + (data.Length * 8 % 5 == 0 ? 0 : 1)];
+            var bits = 0;
+            var value = 0;
+            var index = 0;
+
+            foreach (var b in data)
+            {
+                value = (value << 8) | b;
+                bits += 8;
+
+                while (bits >= 5)
+                {
+                    result[index++] = (byte)((value >> (bits - 5)) & 31);
+                    bits -= 5;
+                }
+            }
+
+            if (bits > 0)
+            {
+                result[index] = (byte)((value << (5 - bits)) & 31);
+            }
+
+            return result;
         }
     }
 } 
