@@ -80,27 +80,57 @@ namespace NostrUnity.Services
 
         public async void PublishEvent(string eventJson)
         {
-            if (!_isConnected)
-            {
-                Debug.LogError("Not connected to relay");
-                return;
-            }
-
             try
             {
-                // Create the Nostr message format: ["EVENT", eventJson]
-                var message = new JArray("EVENT", JObject.Parse(eventJson));
-                string messageJson = message.ToString(Formatting.None);
+                // Validate event JSON
+                if (string.IsNullOrEmpty(eventJson))
+                {
+                    Debug.LogError("Cannot publish null or empty event");
+                    return;
+                }
                 
-                Debug.Log($"Publishing event: {messageJson}");
+                // Ensure the event has the required fields
+                if (!eventJson.Contains("\"id\":") || !eventJson.Contains("\"pubkey\":") || 
+                    !eventJson.Contains("\"sig\":") || !eventJson.Contains("\"created_at\":"))
+                {
+                    Debug.LogError("Event is missing required fields");
+                    return;
+                }
                 
-                var bytes = Encoding.UTF8.GetBytes(messageJson);
-                await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+                // Format the message in the expected relay format: ["EVENT", {...event json...}]
+                string message = $"[\"EVENT\",{eventJson}]";
+                Debug.Log($"Publishing event: {message}");
+                
+                // Validate the message is valid JSON
+                try
+                {
+                    var token = Newtonsoft.Json.Linq.JToken.Parse(message);
+                    if (token.Type != Newtonsoft.Json.Linq.JTokenType.Array)
+                    {
+                        Debug.LogError("Message is not a valid JSON array");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Invalid JSON message: {ex.Message}");
+                    return;
+                }
+                
+                // Send the message
+                if (_webSocket.State == WebSocketState.Open)
+                {
+                    await _webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(message)), 
+                        WebSocketMessageType.Text, true, CancellationToken.None);
+                }
+                else
+                {
+                    Debug.LogError("Cannot publish event - WebSocket is not connected");
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error publishing event: {ex.Message}");
-                _onError?.Invoke(ex.Message);
             }
         }
 
@@ -122,6 +152,45 @@ namespace NostrUnity.Services
                 
                 _webSocket.Dispose();
                 _webSocket = null;
+            }
+        }
+
+        public async void SendWebSocketMessage(string messageJson)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(messageJson))
+                {
+                    Debug.LogError("Cannot send null or empty message");
+                    return;
+                }
+                
+                // Validate the message is valid JSON
+                try
+                {
+                    var token = JToken.Parse(messageJson);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Invalid JSON message: {ex.Message}");
+                    return;
+                }
+                
+                // Send the message
+                if (_webSocket != null && _webSocket.State == WebSocketState.Open)
+                {
+                    await _webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(messageJson)), 
+                        WebSocketMessageType.Text, true, CancellationToken.None);
+                    Debug.Log($"Sent WebSocket message: {messageJson}");
+                }
+                else
+                {
+                    Debug.LogError("Cannot send message - WebSocket is not connected");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error sending message: {ex.Message}");
             }
         }
 

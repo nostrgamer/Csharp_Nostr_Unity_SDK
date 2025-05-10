@@ -10,6 +10,7 @@ A Unity SDK for interacting with the Nostr protocol, providing easy-to-use funct
 - Bech32 encoding for npub/nsec keys
 - Event creation and signing
 - Simple API for posting text notes
+- Support for both hex and nsec format private keys
 
 ## Requirements
 
@@ -55,7 +56,7 @@ public class YourScript : MonoBehaviour
         _nostrManager = gameObject.AddComponent<NostrManager>();
         _nostrManager.Initialize();
 
-        // Or initialize with an existing private key
+        // Or initialize with an existing private key (hex or nsec format)
         // _nostrManager.Initialize("your_private_key_here");
 
         // Post a text note
@@ -77,6 +78,10 @@ string npub = _nostrManager.GetNpub();
 
 // Get your private key in nsec format
 string nsec = _nostrManager.GetNsec();
+
+// You can use either hex format or nsec format for private keys
+_nostrManager.Initialize("nsec1..."); // Using nsec format
+_nostrManager.Initialize("a1b2c3..."); // Using hex format
 ```
 
 ### Posting Notes
@@ -96,9 +101,25 @@ _nostrManager.OnError += (error) => Debug.LogError($"Error: {error}");
 _nostrManager.OnEventReceived += (ev) => Debug.Log($"Received event: {ev.Content}");
 ```
 
-## Example Scene
+## Example Components
 
-The package includes a basic example scene demonstrating the SDK's functionality:
+### NostrEventTest
+
+The package includes a `NostrEventTest` component that demonstrates basic Nostr event creation and posting:
+
+1. Add the `NostrEventTest` component to a GameObject in your scene
+2. Configure the component in the Inspector:
+   - Enter your private key (supports both hex and nsec formats)
+   - Check "Use Provided Key" to use your key (or leave unchecked to generate a new key)
+   - Set relay URLs to connect to
+   - Adjust other settings as needed
+3. Run the scene to connect to relays and post a test message
+
+This component is great for testing connectivity and verifying your keys work with Nostr relays.
+
+### Example Scene
+
+The package also includes a basic example scene demonstrating the SDK's functionality:
 
 1. Open the Package Manager
 2. Find the Nostr Unity SDK
@@ -128,6 +149,10 @@ The example scene includes:
    - Verify that your private key matches your public key
    - Check that the event is properly formatted
    - Ensure the timestamp is not in the future
+
+4. **Private Key Format Issues**
+   - For nsec format keys, ensure they start with "nsec1"
+   - For hex format keys, ensure they are valid hexadecimal (0-9, a-f) and have the correct length (64 characters)
 
 ### Debug Logging
 
