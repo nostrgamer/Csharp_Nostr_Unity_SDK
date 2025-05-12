@@ -103,7 +103,6 @@ namespace NostrUnity.Examples
             try
             {
                 // Create a key pair from the entered private key
-                Debug.Log($"[NostrKeyTester] Creating key pair from input: {privateKeyInput.Substring(0, Math.Min(10, privateKeyInput.Length))}...");
                 _keyPair = new KeyPair(privateKeyInput);
                 Debug.Log("[NostrKeyTester] Successfully created key pair!");
                 

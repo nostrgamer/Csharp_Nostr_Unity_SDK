@@ -17,6 +17,12 @@ namespace NostrUnity.Examples
         [Tooltip("Private key in hex or nsec format. Leave empty to generate a new key.")]
         [SerializeField] private string privateKeyInput = "";
         
+        [Tooltip("Check to generate a new key pair")]
+        [SerializeField] private bool generateNewKey = false;
+        
+        [Tooltip("Generated nsec (read-only)")]
+        [SerializeField] private string generatedNsec = "";
+        
         [Header("Relay Settings")]
         [Tooltip("List of relay URLs to connect to")]
         [SerializeField] private List<string> relayUrls = new List<string>
@@ -61,6 +67,25 @@ namespace NostrUnity.Examples
         
         private void Start()
         {
+            // If generate new key is checked, generate immediately
+            if (generateNewKey)
+            {
+                GenerateNewKeyPair();
+                generateNewKey = false;
+                return;
+            }
+
+            // Try to load from secure storage if no key is input
+            if (string.IsNullOrEmpty(privateKeyInput))
+            {
+                string loadedKey = SecurePlayerPrefs.LoadKey();
+                if (!string.IsNullOrEmpty(loadedKey))
+                {
+                    privateKeyInput = loadedKey;
+                    UpdateStatus("Loaded private key from secure storage.");
+                }
+            }
+
             // Initialize key pair
             if (!string.IsNullOrEmpty(privateKeyInput))
             {
@@ -68,6 +93,8 @@ namespace NostrUnity.Examples
                 {
                     _keyPair = new KeyPair(privateKeyInput);
                     UpdateStatus($"Key loaded. Public key: {_keyPair.Npub}");
+                    // Save securely
+                    SecurePlayerPrefs.SaveKey(privateKeyInput);
                 }
                 catch (Exception ex)
                 {
@@ -77,27 +104,25 @@ namespace NostrUnity.Examples
             }
             else
             {
-                // Generate a new key pair
-                _keyPair = new KeyPair();
-                UpdateStatus($"Generated new key. Public key: {_keyPair.Npub}");
-                privateKeyInput = _keyPair.Nsec;
+                // Generate a new key pair automatically if no key is available
+                GenerateNewKeyPair();
             }
         }
         
         private void Update()
         {
-            // Check if connect button was pressed
-            if (connectToRelays)
+            // Handle relay connection toggle
+            if (connectToRelays && !_connected)
             {
-                connectToRelays = false;
                 ConnectToRelays();
+                connectToRelays = false;
             }
             
-            // Check if publish button was pressed
+            // Handle publish event toggle
             if (publishEvent)
             {
-                publishEvent = false;
                 PublishTextNote();
+                publishEvent = false;
             }
             
             // Update connection status UI
@@ -296,6 +321,35 @@ namespace NostrUnity.Examples
         {
             statusText = $"[{DateTime.Now.ToString("HH:mm:ss")}] {message}";
             Debug.Log($"[NostrPublishExample] {message}");
+        }
+
+        /// <summary>
+        /// Deletes the private key from secure storage
+        /// </summary>
+        public void DeleteStoredPrivateKey()
+        {
+            SecurePlayerPrefs.DeleteKey();
+            UpdateStatus("Deleted private key from secure storage.");
+        }
+
+        private void GenerateNewKeyPair()
+        {
+            try
+            {
+                // Generate a new key pair
+                _keyPair = new KeyPair();
+                privateKeyInput = _keyPair.Nsec;
+                generatedNsec = _keyPair.Nsec;
+                UpdateStatus($"Generated new key pair! Public key: {_keyPair.Npub}");
+                
+                // Save securely
+                SecurePlayerPrefs.SaveKey(_keyPair.Nsec);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error generating key pair: {ex.Message}");
+                Debug.LogError($"Error generating key pair: {ex.Message}");
+            }
         }
     }
 } 

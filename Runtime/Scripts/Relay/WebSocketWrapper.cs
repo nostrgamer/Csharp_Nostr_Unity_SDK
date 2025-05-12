@@ -119,6 +119,34 @@ namespace NostrUnity.Relay
         }
 
         /// <summary>
+        /// Synchronously closes the WebSocket connection - used during application quit
+        /// </summary>
+        public void CloseSync()
+        {
+            if (!_isConnected)
+                return;
+            
+            try
+            {
+                // Cancel any ongoing operations
+                _cts.Cancel();
+                
+                // Set connection state
+                _isConnected = false;
+                
+                // Dispose of resources
+                _webSocket.Dispose();
+                
+                // Notify of closure without trying to send a close frame
+                OnClose?.Invoke(WebSocketCloseCode.Away);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"Error during sync close: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Process message queue - this should be called from Update()
         /// Unity WebGL doesn't support multi-threading so we need to process messages on main thread
         /// </summary>

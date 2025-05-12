@@ -1,10 +1,10 @@
 using System;
-using System.Text.Json;
 using UnityEngine;
-using Newtonsoft.Json.Linq;
+using System.Text.Json;
 using NostrUnity.Models;
+using NostrUnity.Protocol;
 
-namespace NostrUnity.Protocol
+namespace NostrUnity.Relay
 {
     /// <summary>
     /// Handles parsing and processing of Nostr relay messages
@@ -37,12 +37,13 @@ namespace NostrUnity.Protocol
             
             try
             {
-                JArray messageArray = JArray.Parse(message);
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
                 
-                if (messageArray.Count < 1)
+                if (root.GetArrayLength() < 1)
                     return MessageType.Unknown;
                 
-                string type = messageArray[0].ToString();
+                string type = root[0].GetString();
                 
                 switch (type)
                 {
@@ -83,19 +84,24 @@ namespace NostrUnity.Protocol
             
             try
             {
-                JArray messageArray = JArray.Parse(message);
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
                 
-                if (messageArray.Count < 3 || messageArray[0].ToString() != "EVENT")
+                if (root.GetArrayLength() < 3 || root[0].GetString() != "EVENT")
                 {
                     Debug.LogWarning("Invalid EVENT message format");
                     return false;
                 }
                 
-                subscriptionId = messageArray[1].ToString();
-                string eventJson = messageArray[2].ToString();
+                subscriptionId = root[1].GetString();
+                string eventJson = root[2].GetRawText();
                 
                 // Parse the event JSON
-                @event = JsonSerializer.Deserialize<NostrEvent>(eventJson);
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+                @event = JsonSerializer.Deserialize<NostrEvent>(eventJson, options);
                 
                 // Validate the event
                 ValidationResult validationResult = NostrValidator.ValidateEvent(@event);
@@ -126,15 +132,16 @@ namespace NostrUnity.Protocol
             
             try
             {
-                JArray messageArray = JArray.Parse(message);
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
                 
-                if (messageArray.Count < 2 || messageArray[0].ToString() != "NOTICE")
+                if (root.GetArrayLength() < 2 || root[0].GetString() != "NOTICE")
                 {
                     Debug.LogWarning("Invalid NOTICE message format");
                     return false;
                 }
                 
-                notice = messageArray[1].ToString();
+                notice = root[1].GetString();
                 return true;
             }
             catch (Exception ex)
@@ -156,15 +163,16 @@ namespace NostrUnity.Protocol
             
             try
             {
-                JArray messageArray = JArray.Parse(message);
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
                 
-                if (messageArray.Count < 2 || messageArray[0].ToString() != "EOSE")
+                if (root.GetArrayLength() < 2 || root[0].GetString() != "EOSE")
                 {
                     Debug.LogWarning("Invalid EOSE message format");
                     return false;
                 }
                 
-                subscriptionId = messageArray[1].ToString();
+                subscriptionId = root[1].GetString();
                 return true;
             }
             catch (Exception ex)
@@ -190,20 +198,21 @@ namespace NostrUnity.Protocol
             
             try
             {
-                JArray messageArray = JArray.Parse(message);
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
                 
-                if (messageArray.Count < 3 || messageArray[0].ToString() != "OK")
+                if (root.GetArrayLength() < 3 || root[0].GetString() != "OK")
                 {
                     Debug.LogWarning("Invalid OK message format");
                     return false;
                 }
                 
-                eventId = messageArray[1].ToString();
-                success = messageArray[2].Value<bool>();
+                eventId = root[1].GetString();
+                success = root[2].GetBoolean();
                 
-                if (messageArray.Count > 3)
+                if (root.GetArrayLength() > 3)
                 {
-                    reason = messageArray[3].ToString();
+                    reason = root[3].GetString();
                 }
                 
                 return true;
@@ -241,20 +250,20 @@ namespace NostrUnity.Protocol
             
             if (filter == null)
                 throw new ArgumentNullException(nameof(filter), "Filter cannot be null");
-            
+                
             return NostrSerializer.CreateSubscribeMessage(subscriptionId, filter);
         }
         
         /// <summary>
         /// Creates a relay message for unsubscribing from events
         /// </summary>
-        /// <param name="subscriptionId">The subscription ID to close</param>
+        /// <param name="subscriptionId">The subscription ID to unsubscribe</param>
         /// <returns>The formatted relay message</returns>
         public static string CreateUnsubscribeMessage(string subscriptionId)
         {
             if (string.IsNullOrEmpty(subscriptionId))
                 throw new ArgumentException("Subscription ID cannot be null or empty", nameof(subscriptionId));
-            
+                
             return NostrSerializer.CreateUnsubscribeMessage(subscriptionId);
         }
     }
