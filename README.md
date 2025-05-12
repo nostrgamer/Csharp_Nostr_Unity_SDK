@@ -2,8 +2,6 @@
 
 A Unity SDK for interacting with the Nostr protocol, providing easy-to-use functionality for creating, signing, and publishing Nostr events.
 
-** Please note that this project is in alpha. Use at your own risk, particularly inputting nsec keys, as there is no thorough review of security for this project at this time **
-
 ## Features
 
 - Schnorr signature support using NBitcoin.Secp256k1
