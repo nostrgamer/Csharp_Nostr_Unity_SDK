@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using UnityEngine;
 using NostrUnity.Models;
+using System.Threading.Tasks;
+using NostrUnity.Utils;
+using System.Text.Json;
 
 namespace NostrUnity.Relay
 {
@@ -77,25 +79,44 @@ namespace NostrUnity.Relay
         /// <summary>
         /// Connects to the relay
         /// </summary>
-        public void Connect()
+        public async Task ConnectAsync()
         {
             if (_state == RelayState.Connected || _state == RelayState.Connecting)
                 return;
             
-            SetState(RelayState.Connecting);
-            _webSocket.Connect();
+            try
+            {
+                SetState(RelayState.Connecting);
+                _webSocket.Connect();
+                await Task.CompletedTask; // For async compatibility
+            }
+            catch (Exception ex)
+            {
+                NostrErrorHandler.HandleError(ex, $"Relay.Connect ({_url})", NostrErrorHandler.NostrErrorSeverity.Error);
+                SetState(RelayState.Failed);
+                throw;
+            }
         }
         
         /// <summary>
         /// Disconnects from the relay
         /// </summary>
-        public void Disconnect()
+        public async Task DisconnectAsync()
         {
             if (_state == RelayState.Disconnected)
                 return;
             
-            _webSocket.Disconnect();
-            SetState(RelayState.Disconnected);
+            try
+            {
+                _webSocket.Disconnect();
+                SetState(RelayState.Disconnected);
+                await Task.CompletedTask; // For async compatibility
+            }
+            catch (Exception ex)
+            {
+                NostrErrorHandler.HandleError(ex, $"Relay.Disconnect ({_url})", NostrErrorHandler.NostrErrorSeverity.Warning);
+                SetState(RelayState.Failed);
+            }
         }
         
         /// <summary>
@@ -110,7 +131,7 @@ namespace NostrUnity.Relay
         /// Publishes an event to the relay
         /// </summary>
         /// <param name="nostrEvent">The Nostr event to publish</param>
-        public void PublishEvent(NostrEvent nostrEvent)
+        public async Task PublishEventAsync(NostrEvent nostrEvent)
         {
             if (_state != RelayState.Connected)
             {
@@ -133,10 +154,11 @@ namespace NostrUnity.Relay
                 
                 Debug.Log($"Publishing event {nostrEvent.Id} to {_url}: {message}");
                 _webSocket.SendMessage(message);
+                await Task.CompletedTask; // For async compatibility
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error formatting event for publishing: {ex.Message}");
+                NostrErrorHandler.HandleError(ex, $"Relay.PublishEvent ({_url})", NostrErrorHandler.NostrErrorSeverity.Error);
                 throw;
             }
         }
@@ -147,7 +169,7 @@ namespace NostrUnity.Relay
         /// <param name="subscriptionId">Unique ID for this subscription</param>
         /// <param name="filter">The filter to apply</param>
         /// <param name="callback">Optional callback for events matching this subscription</param>
-        public void Subscribe(string subscriptionId, Filter filter, Action<NostrEvent> callback = null)
+        public async Task SubscribeAsync(string subscriptionId, Filter filter, Action<NostrEvent> callback = null)
         {
             if (string.IsNullOrEmpty(subscriptionId))
                 throw new ArgumentException("Subscription ID cannot be null or empty", nameof(subscriptionId));
@@ -173,13 +195,14 @@ namespace NostrUnity.Relay
             string message = JsonSerializer.Serialize(new object[] { "REQ", subscriptionId, filterJson });
             
             _webSocket.SendMessage(message);
+            await Task.CompletedTask; // For async compatibility
         }
         
         /// <summary>
         /// Unsubscribes from a previous subscription
         /// </summary>
         /// <param name="subscriptionId">The ID of the subscription to cancel</param>
-        public void Unsubscribe(string subscriptionId)
+        public async Task UnsubscribeAsync(string subscriptionId)
         {
             if (string.IsNullOrEmpty(subscriptionId))
                 throw new ArgumentException("Subscription ID cannot be null or empty", nameof(subscriptionId));
@@ -190,6 +213,57 @@ namespace NostrUnity.Relay
             // Send unsubscribe message
             string message = JsonSerializer.Serialize(new object[] { "CLOSE", subscriptionId });
             _webSocket.SendMessage(message);
+            await Task.CompletedTask; // For async compatibility
+        }
+        
+        /// <summary>
+        /// Connects to the relay (non-async version)
+        /// </summary>
+        public void Connect()
+        {
+            // Call the async method without waiting
+            _ = ConnectAsync();
+        }
+        
+        /// <summary>
+        /// Disconnects from the relay (non-async version)
+        /// </summary>
+        public void Disconnect()
+        {
+            // Call the async method without waiting
+            _ = DisconnectAsync();
+        }
+        
+        /// <summary>
+        /// Subscribes to events matching the specified filter (non-async version)
+        /// </summary>
+        /// <param name="subscriptionId">Unique ID for this subscription</param>
+        /// <param name="filter">The filter to apply</param>
+        /// <param name="callback">Optional callback for events matching this subscription</param>
+        public void Subscribe(string subscriptionId, Filter filter, Action<NostrEvent> callback = null)
+        {
+            // Call the async method without waiting
+            _ = SubscribeAsync(subscriptionId, filter, callback);
+        }
+        
+        /// <summary>
+        /// Unsubscribes from a previous subscription (non-async version)
+        /// </summary>
+        /// <param name="subscriptionId">The ID of the subscription to cancel</param>
+        public void Unsubscribe(string subscriptionId)
+        {
+            // Call the async method without waiting
+            _ = UnsubscribeAsync(subscriptionId);
+        }
+        
+        /// <summary>
+        /// Publishes an event to the relay (non-async version)
+        /// </summary>
+        /// <param name="nostrEvent">The Nostr event to publish</param>
+        public void PublishEvent(NostrEvent nostrEvent)
+        {
+            // Call the async method without waiting
+            _ = PublishEventAsync(nostrEvent);
         }
         
         #region Event Handlers
@@ -216,51 +290,49 @@ namespace NostrUnity.Relay
             try
             {
                 // Parse the message which should be a JSON array
-                using (JsonDocument doc = JsonDocument.Parse(message))
+                using var jsonDoc = JsonDocument.Parse(message);
+                var root = jsonDoc.RootElement;
+                
+                if (root.GetArrayLength() < 2)
                 {
-                    JsonElement root = doc.RootElement;
-                    
-                    if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 2)
-                    {
-                        Debug.LogWarning($"Invalid message format from relay {_url}: {message}");
-                        return;
-                    }
-                    
-                    string messageType = root[0].GetString();
-                    
-                    switch (messageType)
-                    {
-                        case "EVENT":
-                            HandleEventMessage(root);
-                            break;
+                    Debug.LogWarning($"Invalid message format from relay {_url}: {message}");
+                    return;
+                }
+                
+                string messageType = root[0].GetString();
+                
+                switch (messageType)
+                {
+                    case "EVENT":
+                        HandleEventMessage(root);
+                        break;
+                        
+                    case "EOSE":
+                        // End of stored events
+                        string subId = root[1].GetString();
+                        Debug.Log($"End of stored events for subscription {subId}");
+                        break;
+                        
+                    case "NOTICE":
+                        string notice = root[1].GetString();
+                        Debug.Log($"Notice from relay {_url}: {notice}");
+                        break;
+                        
+                    case "OK":
+                        // Event publish response
+                        if (root.GetArrayLength() >= 3)
+                        {
+                            string eventId = root[1].GetString();
+                            bool success = root[2].GetBoolean();
+                            string resultMessage = root.GetArrayLength() > 3 ? root[3].GetString() : string.Empty;
                             
-                        case "EOSE":
-                            // End of stored events
-                            string subId = root[1].GetString();
-                            Debug.Log($"End of stored events for subscription {subId}");
-                            break;
-                            
-                        case "NOTICE":
-                            string notice = root[1].GetString();
-                            Debug.Log($"Notice from relay {_url}: {notice}");
-                            break;
-                            
-                        case "OK":
-                            // Event publish response
-                            if (root.GetArrayLength() >= 3)
-                            {
-                                string eventId = root[1].GetString();
-                                bool success = root[2].GetBoolean();
-                                string resultMessage = root.GetArrayLength() > 3 ? root[3].GetString() : string.Empty;
-                                
-                                Debug.Log($"Publish result for event {eventId}: {(success ? "Success" : "Failed")} {resultMessage}");
-                            }
-                            break;
-                            
-                        default:
-                            Debug.LogWarning($"Unknown message type from relay {_url}: {messageType}");
-                            break;
-                    }
+                            Debug.Log($"Publish result for event {eventId}: {(success ? "Success" : "Failed")} {resultMessage}");
+                        }
+                        break;
+                        
+                    default:
+                        Debug.LogWarning($"Unknown message type from relay {_url}: {messageType}");
+                        break;
                 }
             }
             catch (Exception ex)
@@ -284,7 +356,11 @@ namespace NostrUnity.Relay
                 string eventJson = root[2].GetRawText();
                 
                 // Parse the event JSON
-                NostrEvent nostrEvent = JsonSerializer.Deserialize<NostrEvent>(eventJson);
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+                NostrEvent nostrEvent = JsonSerializer.Deserialize<NostrEvent>(eventJson, options);
                 
                 // Invoke the subscription callback if one exists
                 if (_subscriptions.TryGetValue(subscriptionId, out Action<NostrEvent> callback))

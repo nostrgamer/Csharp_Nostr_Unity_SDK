@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json.Serialization;
+using System.Collections.Generic;
 
 namespace NostrUnity.Models
 {
@@ -10,52 +11,94 @@ namespace NostrUnity.Models
     public class Filter
     {
         /// <summary>
-        /// List of event ids to filter
+        /// List of event IDs to query for
         /// </summary>
         [JsonPropertyName("ids")]
         public string[] Ids { get; set; }
         
         /// <summary>
-        /// List of pubkeys to filter (the pubkey of an event)
+        /// List of pubkeys (authors) to query for
         /// </summary>
         [JsonPropertyName("authors")]
         public string[] Authors { get; set; }
         
         /// <summary>
-        /// List of event kinds to filter
+        /// List of event kinds to query for
         /// </summary>
         [JsonPropertyName("kinds")]
         public int[] Kinds { get; set; }
         
         /// <summary>
-        /// Filter by events referencing these event ids
+        /// Event tags to query for
         /// </summary>
-        [JsonPropertyName("#e")]
-        public string[] EventTags { get; set; }
+        [JsonPropertyName("tags")]
+        public Dictionary<string, string[]> Tags { get; set; }
         
         /// <summary>
-        /// Filter by events referencing these pubkeys
-        /// </summary>
-        [JsonPropertyName("#p")]
-        public string[] PubkeyTags { get; set; }
-        
-        /// <summary>
-        /// Filter by events newer than this unix timestamp
+        /// Query events since this timestamp
         /// </summary>
         [JsonPropertyName("since")]
         public long? Since { get; set; }
         
         /// <summary>
-        /// Filter by events older than this unix timestamp
+        /// Query events until this timestamp
         /// </summary>
         [JsonPropertyName("until")]
         public long? Until { get; set; }
         
         /// <summary>
-        /// Maximum number of events to return
+        /// Limit the number of events returned
         /// </summary>
         [JsonPropertyName("limit")]
         public int? Limit { get; set; }
+
+        /// <summary>
+        /// Gets or sets the event IDs to filter by (e tags)
+        /// </summary>
+        [JsonIgnore]
+        public string[] EventTags
+        {
+            get
+            {
+                if (Tags != null && Tags.TryGetValue("e", out var eTags))
+                {
+                    return eTags;
+                }
+                return Array.Empty<string>();
+            }
+            set
+            {
+                if (Tags == null)
+                {
+                    Tags = new Dictionary<string, string[]>();
+                }
+                Tags["e"] = value ?? Array.Empty<string>();
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the pubkeys to filter by (p tags)
+        /// </summary>
+        [JsonIgnore]
+        public string[] PubkeyTags
+        {
+            get
+            {
+                if (Tags != null && Tags.TryGetValue("p", out var pTags))
+                {
+                    return pTags;
+                }
+                return Array.Empty<string>();
+            }
+            set
+            {
+                if (Tags == null)
+                {
+                    Tags = new Dictionary<string, string[]>();
+                }
+                Tags["p"] = value ?? Array.Empty<string>();
+            }
+        }
         
         /// <summary>
         /// Creates a new empty filter
@@ -65,8 +108,7 @@ namespace NostrUnity.Models
             Ids = Array.Empty<string>();
             Authors = Array.Empty<string>();
             Kinds = Array.Empty<int>();
-            EventTags = Array.Empty<string>();
-            PubkeyTags = Array.Empty<string>();
+            Tags = new Dictionary<string, string[]>();
         }
     }
 } 

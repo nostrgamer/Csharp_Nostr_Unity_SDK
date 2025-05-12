@@ -1,12 +1,10 @@
 using System;
 using System.Text;
 using System.Security.Cryptography;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using UnityEngine;
 using NostrUnity.Models;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NostrUnity.Protocol
 {
@@ -15,6 +13,12 @@ namespace NostrUnity.Protocol
     /// </summary>
     public static class NostrSerializer
     {
+        private static readonly JsonSerializerOptions DefaultOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+        
         /// <summary>
         /// Serializes an event for ID computation according to NIP-01
         /// </summary>
@@ -38,7 +42,7 @@ namespace NostrUnity.Protocol
             };
             
             // Use System.Text.Json for standardized serialization
-            string serialized = System.Text.Json.JsonSerializer.Serialize(array);
+            string serialized = JsonSerializer.Serialize(array);
             Debug.Log($"[SERIALIZER] Serialized event for ID: {serialized}");
             
             return serialized;
@@ -85,13 +89,12 @@ namespace NostrUnity.Protocol
             };
             
             // Use settings matching Nostr relay expectations
-            var settings = new JsonSerializerSettings
+            var options = new JsonSerializerOptions
             {
-                Formatting = Formatting.None,
-                NullValueHandling = NullValueHandling.Include
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
             
-            string serialized = JsonConvert.SerializeObject(completeEvent, settings);
+            string serialized = JsonSerializer.Serialize(completeEvent, options);
             Debug.Log($"[SERIALIZER] Serialized complete event: {serialized}");
             
             return serialized;
@@ -107,14 +110,14 @@ namespace NostrUnity.Protocol
             if (@event == null)
                 throw new ArgumentNullException(nameof(@event), "Event cannot be null");
             
-            // Use System.Text.Json with appropriate options
+            // Use System.Text.Json with appropriate settings
             var options = new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
             
-            string serialized = System.Text.Json.JsonSerializer.Serialize(@event, options);
+            string serialized = JsonSerializer.Serialize(@event, options);
             Debug.Log($"[SERIALIZER] Serialized event for relay: {serialized}");
             
             return serialized;
@@ -131,7 +134,7 @@ namespace NostrUnity.Protocol
                 throw new ArgumentNullException(nameof(@event), "Event cannot be null");
             
             string eventJson = SerializeForRelay(@event);
-            string message = System.Text.Json.JsonSerializer.Serialize(new object[] { "EVENT", eventJson });
+            string message = JsonSerializer.Serialize(new object[] { "EVENT", eventJson });
             
             return message;
         }
@@ -152,12 +155,11 @@ namespace NostrUnity.Protocol
             
             var options = new JsonSerializerOptions
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
             
-            string filterJson = System.Text.Json.JsonSerializer.Serialize(filter, options);
-            string message = System.Text.Json.JsonSerializer.Serialize(new object[] { "REQ", subscriptionId, filterJson });
+            string filterJson = JsonSerializer.Serialize(filter, options);
+            string message = JsonSerializer.Serialize(new object[] { "REQ", subscriptionId, filterJson });
             
             return message;
         }
@@ -172,7 +174,7 @@ namespace NostrUnity.Protocol
             if (string.IsNullOrEmpty(subscriptionId))
                 throw new ArgumentException("Subscription ID cannot be null or empty", nameof(subscriptionId));
             
-            string message = System.Text.Json.JsonSerializer.Serialize(new object[] { "CLOSE", subscriptionId });
+            string message = JsonSerializer.Serialize(new object[] { "CLOSE", subscriptionId });
             return message;
         }
         
@@ -180,21 +182,59 @@ namespace NostrUnity.Protocol
         /// Parses a relay message into its components
         /// </summary>
         /// <param name="message">The relay message to parse</param>
-        /// <returns>The message parts as a JArray</returns>
-        public static JArray ParseRelayMessage(string message)
+        /// <returns>The message parts as a JsonDocument</returns>
+        public static JsonDocument ParseRelayMessage(string message)
         {
             if (string.IsNullOrEmpty(message))
                 throw new ArgumentException("Message cannot be null or empty", nameof(message));
             
             try
             {
-                return JArray.Parse(message);
+                return JsonDocument.Parse(message);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[SERIALIZER] Error parsing relay message: {ex.Message}");
                 throw new FormatException($"Invalid relay message format: {ex.Message}", ex);
             }
+        }
+
+        /// <summary>
+        /// Serializes a request message
+        /// </summary>
+        public static string SerializeRequest(string type, string subscriptionId, Filter filter)
+        {
+            var message = new object[] { type, subscriptionId, filter };
+            return JsonSerializer.Serialize(message, DefaultOptions);
+        }
+
+        /// <summary>
+        /// Serializes an event message
+        /// </summary>
+        public static string SerializeEvent(string type, NostrEvent nostrEvent)
+        {
+            var message = new object[] { type, nostrEvent };
+            return JsonSerializer.Serialize(message, DefaultOptions);
+        }
+
+        /// <summary>
+        /// Deserializes a message from a relay
+        /// </summary>
+        public static (string type, string subscriptionId, NostrEvent nostrEvent) DeserializeMessage(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            
+            string type = root[0].GetString();
+            string subscriptionId = root[1].GetString();
+            NostrEvent nostrEvent = null;
+            
+            if (root.GetArrayLength() > 2)
+            {
+                nostrEvent = JsonSerializer.Deserialize<NostrEvent>(root[2].GetRawText(), DefaultOptions);
+            }
+            
+            return (type, subscriptionId, nostrEvent);
         }
     }
 } 

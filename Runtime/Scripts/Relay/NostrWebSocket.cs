@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
+using NostrUnity.Utils;
 
 namespace NostrUnity.Relay
 {
@@ -21,6 +22,11 @@ namespace NostrUnity.Relay
         private float _reconnectDelay = 2f;
         private int _reconnectAttempts = 0;
         private const int MaxReconnectAttempts = 5;
+        
+        // Rate limiting
+        private RateLimiter _rateLimiter;
+        private const int DefaultMaxMessagesPerInterval = 10;
+        private const float DefaultIntervalSeconds = 1.0f;
 
         // Events
         public event Action<string> OnMessageReceived;
@@ -32,9 +38,15 @@ namespace NostrUnity.Relay
         /// Creates a new WebSocket client for a specific relay
         /// </summary>
         /// <param name="relayUrl">The URL of the relay (wss://...)</param>
-        public NostrWebSocket(string relayUrl)
+        /// <param name="maxMessagesPerInterval">Maximum number of messages allowed per interval (default 10)</param>
+        /// <param name="intervalSeconds">The interval length in seconds (default 1 second)</param>
+        public NostrWebSocket(string relayUrl, int maxMessagesPerInterval = DefaultMaxMessagesPerInterval, float intervalSeconds = DefaultIntervalSeconds)
         {
             _relayUrl = relayUrl;
+            _rateLimiter = new RateLimiter(maxMessagesPerInterval, intervalSeconds);
+            
+            // Register with CoroutineRunner for application quit handling
+            CoroutineRunner.RegisterWebSocket(this);
         }
 
         /// <summary>
@@ -90,13 +102,16 @@ namespace NostrUnity.Relay
             
             _isConnected = false;
             _isConnecting = false;
+            
+            // Unregister from CoroutineRunner
+            CoroutineRunner.UnregisterWebSocket(this);
         }
 
         /// <summary>
-        /// Sends a message to the relay
+        /// Sends a message to the relay with rate limiting
         /// </summary>
         /// <param name="message">JSON message to send</param>
-        public async void SendMessage(string message)
+        public void SendMessage(string message)
         {
             if (!_isConnected)
             {
@@ -108,6 +123,23 @@ namespace NostrUnity.Relay
                     Connect();
                 }
                 
+                return;
+            }
+
+            // Use rate limiter to send or queue the message
+            _rateLimiter.TrySend(message, SendMessageInternal);
+        }
+
+        /// <summary>
+        /// Internal method to actually send a message
+        /// </summary>
+        /// <param name="message">The message to send</param>
+        private async void SendMessageInternal(string message)
+        {
+            if (!_isConnected)
+            {
+                // Queue message if not connected
+                _messageQueue.Enqueue(message);
                 return;
             }
 
@@ -143,8 +175,11 @@ namespace NostrUnity.Relay
                 _webSocket.DispatchMessageQueue();
                 #endif
                 
-                // Process queued messages if connected
-                if (_isConnected && _messageQueue.Count > 0)
+                // Update rate limiter to process any queued messages
+                _rateLimiter.Update();
+                
+                // Process connection queue if connected and rate limiter has no queued messages
+                if (_isConnected && _messageQueue.Count > 0 && !_rateLimiter.HasQueuedMessages)
                 {
                     string message = _messageQueue.Dequeue();
                     SendMessage(message);
@@ -217,6 +252,30 @@ namespace NostrUnity.Relay
         }
 
         #endregion
+
+        /// <summary>
+        /// Cleans up WebSocket resources when the application quits
+        /// </summary>
+        public void CleanupOnQuit()
+        {
+            _autoReconnect = false;
+            
+            if (_webSocket != null && (_isConnected || _isConnecting))
+            {
+                try
+                {
+                    // Use synchronous close to ensure it happens during application quit
+                    _webSocket.CloseSync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Error during WebSocket cleanup: {ex.Message}");
+                }
+            }
+            
+            _isConnected = false;
+            _isConnecting = false;
+        }
     }
     
     /// <summary>
@@ -225,6 +284,7 @@ namespace NostrUnity.Relay
     internal class CoroutineRunner : MonoBehaviour
     {
         private static CoroutineRunner _instance;
+        private static List<NostrWebSocket> _activeWebSockets = new List<NostrWebSocket>();
         
         public static CoroutineRunner Instance
         {
@@ -240,6 +300,48 @@ namespace NostrUnity.Relay
                 
                 return _instance;
             }
+        }
+        
+        /// <summary>
+        /// Registers a WebSocket with the CoroutineRunner for application quit handling
+        /// </summary>
+        /// <param name="webSocket">The WebSocket to register</param>
+        public static void RegisterWebSocket(NostrWebSocket webSocket)
+        {
+            if (!_activeWebSockets.Contains(webSocket))
+            {
+                _activeWebSockets.Add(webSocket);
+            }
+        }
+        
+        /// <summary>
+        /// Unregisters a WebSocket from the CoroutineRunner
+        /// </summary>
+        /// <param name="webSocket">The WebSocket to unregister</param>
+        public static void UnregisterWebSocket(NostrWebSocket webSocket)
+        {
+            _activeWebSockets.Remove(webSocket);
+        }
+        
+        private void OnApplicationQuit()
+        {
+            // Make a copy of the collection to avoid modification during enumeration
+            var websockets = new List<NostrWebSocket>(_activeWebSockets);
+            
+            // Disable auto-reconnect and disconnect all active WebSockets
+            foreach (var webSocket in websockets)
+            {
+                try
+                {
+                    webSocket.CleanupOnQuit();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Error during WebSocket cleanup: {ex.Message}");
+                }
+            }
+            
+            _activeWebSockets.Clear();
         }
     }
 } 

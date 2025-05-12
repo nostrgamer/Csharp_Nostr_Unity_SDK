@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 using UnityEngine;
 using NostrUnity.Utils;
@@ -24,55 +22,53 @@ namespace NostrUnity.Models
         /// <summary>
         /// The event ID (32-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("id")]
+        [JsonProperty("id")]
         public string Id { get; private set; }
         
         /// <summary>
         /// The event creator's public key (32-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("pubkey")]
+        [JsonProperty("pubkey")]
         public string Pubkey { get; private set; }
         
         /// <summary>
         /// The public key in compressed format for internal verification
         /// Not serialized to JSON - used only for signature verification
         /// </summary>
-        [Newtonsoft.Json.JsonIgnore]
-        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonIgnore]
         internal string CompressedPublicKey { get; private set; }
         
         /// <summary>
         /// The Unix timestamp when the event was created
         /// </summary>
-        [JsonPropertyName("created_at")]
+        [JsonProperty("created_at")]
         public long CreatedAt { get; private set; }
         
         /// <summary>
         /// The event kind/type
         /// </summary>
-        [JsonPropertyName("kind")]
+        [JsonProperty("kind")]
         public int Kind { get; private set; }
         
         /// <summary>
         /// The event tags (array of arrays)
         /// </summary>
-        [JsonPropertyName("tags")]
+        [JsonProperty("tags")]
         public string[][] Tags { get; private set; }
         
         /// <summary>
         /// The event content
         /// </summary>
-        [JsonPropertyName("content")]
+        [JsonProperty("content")]
         public string Content { get; private set; }
         
         /// <summary>
         /// The event signature (64-byte hex-encoded string)
         /// </summary>
-        [JsonPropertyName("sig")]
+        [JsonProperty("sig")]
         public string Sig { get; private set; }
         
-        [Newtonsoft.Json.JsonIgnore]
-        [System.Text.Json.Serialization.JsonIgnore]
+        [JsonProperty]
         public byte[] PrivateKey { get; set; }
         
         /// <summary>
@@ -345,22 +341,19 @@ namespace NostrUnity.Models
         public string GetSerializedEvent()
         {
             // Create a new anonymous object with only the required fields in the specific order
-            // This is critical for signatures as serialization order matters
             var serializableEvent = new
             {
-                // The pubkey needs to be standard 64-char format for Nostr relays
-                pubkey = Pubkey.ToLowerInvariant(), // Ensure lowercase
+                pubkey = Pubkey.ToLowerInvariant(),
                 created_at = CreatedAt,
                 kind = Kind,
                 tags = Tags ?? new string[0][],
                 content = Content
             };
             
-            // Use System.Text.Json for serialization
-            string serialized = System.Text.Json.JsonSerializer.Serialize(serializableEvent);
+            // Use JsonConvert for serialization
+            string serialized = JsonConvert.SerializeObject(serializableEvent);
             
             // Ensure consistent formatting by creating an array with fixed order
-            // [0, pubkey, created_at, kind, tags, content]
             var jsonParse = JObject.Parse(serialized);
             var arr = new JArray();
             
@@ -463,7 +456,7 @@ namespace NostrUnity.Models
         public string SerializeForId()
         {
             var array = new object[] { 0, Pubkey, CreatedAt, Kind, Tags ?? Array.Empty<string[]>(), Content };
-            return System.Text.Json.JsonSerializer.Serialize(array);
+            return JsonConvert.SerializeObject(array);
         }
 
         /// <summary>
@@ -471,7 +464,7 @@ namespace NostrUnity.Models
         /// </summary>
         public string ToJson()
         {
-            return System.Text.Json.JsonSerializer.Serialize(this);
+            return JsonConvert.SerializeObject(this);
         }
 
         /// <summary>
