@@ -6,22 +6,27 @@ This directory contains example scenes demonstrating how to integrate Nostr func
 
 Each scene demonstrates practical game development use cases:
 
-1. **Secret Key Authentication**
+1. **Input Secret Key and Publish Message**
    - Input and validate Nostr secret keys
    - Publish game-related messages
    - Secure key storage and management
 
-2. **High Score Submission**
+2. **Create Key and Publish Message**
+   - Create and validate Nostr keys
+   - Publish game-related messages
+   - Secure key storage and management
+
+3. **High Score Submission**
    - Send player high scores to a specific npub
    - Format and structure score data
    - Handle submission responses
 
-3. **Game Invitations**
+4. **Game Invitations**
    - Send game invitations to other players
    - Include download links and game information
    - Track invitation responses
 
-4. **Leaderboard Setup**
+5. **Leaderboard Setup**
    - Configure a game-specific npub for leaderboards
    - Set up score tracking and validation
    - Manage leaderboard updates and queries
