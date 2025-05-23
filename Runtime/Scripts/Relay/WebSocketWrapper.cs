@@ -101,20 +101,51 @@ namespace NostrUnity.Relay
             if (!_isConnected)
                 return;
             
+            _isConnected = false; // Set this first to prevent race conditions
+            
             try
             {
-                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closed by client", CancellationToken.None);
-                _isConnected = false;
+                // Cancel the cancellation token to stop ongoing operations
+                if (!_cts.IsCancellationRequested)
+                {
+                    _cts.Cancel();
+                }
+                
+                // Wait for receive task to complete with a timeout
+                if (_receiveTask != null && !_receiveTask.IsCompleted)
+                {
+                    await Task.WhenAny(_receiveTask, Task.Delay(1000));
+                }
+                
+                // Attempt to close gracefully if WebSocket is still open
+                if (_webSocket.State == WebSocketState.Open)
+                {
+                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closed by client", _cts.Token);
+                }
+                
+                OnClose?.Invoke(WebSocketCloseCode.Normal);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation token is triggered
                 OnClose?.Invoke(WebSocketCloseCode.Normal);
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(ex.Message);
+                OnClose?.Invoke(WebSocketCloseCode.Abnormal);
             }
             finally
             {
-                _cts.Cancel();
-                _webSocket.Dispose();
+                try
+                {
+                    _webSocket?.Dispose();
+                    _cts?.Dispose();
+                }
+                catch (Exception)
+                {
+                    // Ignore dispose errors
+                }
             }
         }
 
@@ -126,23 +157,53 @@ namespace NostrUnity.Relay
             if (!_isConnected)
                 return;
             
+            _isConnected = false; // Set this first to prevent race conditions
+            
             try
             {
-                // Cancel any ongoing operations
-                _cts.Cancel();
+                // Cancel any ongoing operations first
+                if (!_cts.IsCancellationRequested)
+                {
+                    _cts.Cancel();
+                }
                 
-                // Set connection state
-                _isConnected = false;
+                // Give a brief moment for operations to cancel gracefully
+                if (_receiveTask != null && !_receiveTask.IsCompleted)
+                {
+                    Task.WhenAny(_receiveTask, Task.Delay(100)).Wait(200);
+                }
                 
-                // Dispose of resources
-                _webSocket.Dispose();
+                // Attempt graceful close if still open
+                if (_webSocket?.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Application closing", CancellationToken.None).Wait(500);
+                    }
+                    catch (TimeoutException)
+                    {
+                        // Timeout during close is acceptable during shutdown
+                    }
+                }
                 
-                // Notify of closure without trying to send a close frame
+                // Only notify of closure if we haven't already
                 OnClose?.Invoke(WebSocketCloseCode.Away);
             }
             catch (Exception ex)
             {
                 Debug.LogWarning($"Error during sync close: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    _webSocket?.Dispose();
+                    _cts?.Dispose();
+                }
+                catch (Exception)
+                {
+                    // Ignore dispose errors during shutdown
+                }
             }
         }
 
@@ -164,20 +225,25 @@ namespace NostrUnity.Relay
             
             try
             {
-                while (_isConnected && !_cts.IsCancellationRequested)
+                while (_isConnected && !_cts.IsCancellationRequested && _webSocket.State == WebSocketState.Open)
                 {
                     var segment = new ArraySegment<byte>(buffer);
                     WebSocketReceiveResult result = await _webSocket.ReceiveAsync(segment, _cts.Token);
                     
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        _isConnected = false;
-                        WebSocketCloseCode code = (WebSocketCloseCode)result.CloseStatus.GetHashCode();
-                        OnClose?.Invoke(code);
+                        if (_isConnected) // Only process close if we haven't already handled it
+                        {
+                            _isConnected = false;
+                            WebSocketCloseCode code = result.CloseStatus.HasValue ? 
+                                (WebSocketCloseCode)(int)result.CloseStatus.Value : 
+                                WebSocketCloseCode.Abnormal;
+                            OnClose?.Invoke(code);
+                        }
                         break;
                     }
                     
-                    if (result.MessageType == WebSocketMessageType.Text)
+                    if (result.MessageType == WebSocketMessageType.Text && _isConnected)
                     {
                         byte[] message = new byte[result.Count];
                         Array.Copy(buffer, message, result.Count);
@@ -185,7 +251,25 @@ namespace NostrUnity.Relay
                     }
                 }
             }
-            catch (Exception ex) when (!_cts.IsCancellationRequested)
+            catch (OperationCanceledException)
+            {
+                // Normal cancellation - don't treat as error
+                if (_isConnected)
+                {
+                    _isConnected = false;
+                    OnClose?.Invoke(WebSocketCloseCode.Normal);
+                }
+            }
+            catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
+            {
+                // Remote closed connection without proper handshake
+                if (_isConnected)
+                {
+                    _isConnected = false;
+                    OnClose?.Invoke(WebSocketCloseCode.Abnormal);
+                }
+            }
+            catch (Exception ex) when (!_cts.IsCancellationRequested && _isConnected)
             {
                 _isConnected = false;
                 OnError?.Invoke(ex.Message);
