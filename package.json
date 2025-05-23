@@ -1,6 +1,6 @@
 {
     "name": "com.nostrgamer.unitysdk",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "displayName": "Nostr Unity SDK",
     "description": "A Unity SDK for interacting with the Nostr protocol",
     "unity": "2021.3",
