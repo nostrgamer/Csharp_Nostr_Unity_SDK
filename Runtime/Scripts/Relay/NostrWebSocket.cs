@@ -214,6 +214,10 @@ namespace NostrUnity.Relay
 
         private void HandleClose(WebSocketCloseCode closeCode)
         {
+            // Prevent duplicate close handling
+            if (!_isConnected && !_isConnecting)
+                return;
+                
             string reason = $"WebSocket closed with code: {closeCode}";
             Debug.Log($"Disconnected from relay {_relayUrl}: {reason}");
             
@@ -222,8 +226,9 @@ namespace NostrUnity.Relay
             
             OnDisconnected?.Invoke(reason);
             
-            // Attempt to reconnect if auto-reconnect is enabled
-            if (_autoReconnect && _reconnectAttempts < MaxReconnectAttempts)
+            // Only attempt to reconnect if auto-reconnect is enabled and we haven't exceeded attempts
+            // Also don't reconnect during application shutdown
+            if (_autoReconnect && _reconnectAttempts < MaxReconnectAttempts && Application.isPlaying)
             {
                 _reconnectAttempts++;
                 float delay = _reconnectDelay * _reconnectAttempts;
@@ -244,7 +249,8 @@ namespace NostrUnity.Relay
         {
             yield return new WaitForSeconds(delay);
             
-            if (!_isConnected && !_isConnecting && _autoReconnect)
+            // Double-check that we should still reconnect
+            if (!_isConnected && !_isConnecting && _autoReconnect && Application.isPlaying)
             {
                 Debug.Log($"Attempting to reconnect to {_relayUrl}");
                 Connect();
@@ -258,10 +264,18 @@ namespace NostrUnity.Relay
         /// </summary>
         public void CleanupOnQuit()
         {
+            // Disable auto-reconnect first to prevent any reconnection attempts
             _autoReconnect = false;
+            
+            // Clear any queued messages
+            _messageQueue.Clear();
             
             if (_webSocket != null && (_isConnected || _isConnecting))
             {
+                // Set disconnecting state to prevent event handling
+                _isConnecting = false;
+                _isConnected = false;
+                
                 try
                 {
                     // Use synchronous close to ensure it happens during application quit
@@ -269,12 +283,9 @@ namespace NostrUnity.Relay
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"Error during WebSocket cleanup: {ex.Message}");
+                    Debug.LogWarning($"Error during WebSocket cleanup for {_relayUrl}: {ex.Message}");
                 }
             }
-            
-            _isConnected = false;
-            _isConnecting = false;
         }
     }
     
@@ -324,6 +335,32 @@ namespace NostrUnity.Relay
         }
         
         private void OnApplicationQuit()
+        {
+            Debug.Log("NostrCoroutineRunner: Application quit detected, cleaning up WebSockets");
+            CleanupAllWebSockets();
+        }
+        
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            // When the application is paused (e.g., ALT+TAB, minimized), we should also cleanup
+            if (pauseStatus)
+            {
+                Debug.Log("NostrCoroutineRunner: Application paused, cleaning up WebSockets");
+                CleanupAllWebSockets();
+            }
+        }
+        
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            // When the application loses focus, cleanup WebSockets to prevent connection issues
+            if (!hasFocus)
+            {
+                Debug.Log("NostrCoroutineRunner: Application focus lost, cleaning up WebSockets");
+                CleanupAllWebSockets();
+            }
+        }
+        
+        private void CleanupAllWebSockets()
         {
             // Make a copy of the collection to avoid modification during enumeration
             var websockets = new List<NostrWebSocket>(_activeWebSockets);
